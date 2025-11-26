@@ -1,0 +1,1591 @@
+// ====================================================
+// Pepzi Backend Snapshot
+// Generated: Fri Nov 21 11:35:05 PM UTC 2025
+// Working dir: /home/ascensionfd50/pepzi/backend
+// ====================================================
+
+// ---------- PACKAGE & CONFIG ----------
+
+// ========== package.json ==========
+{
+  "name": "pepzi-backend",
+  "version": "1.0.0",
+  "description": "Pepzi AI Life OS - Backend API",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "pepzi",
+    "life-os",
+    "ai",
+    "scheduling"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "cors": "^2.8.5",
+    "date-fns": "^3.0.6",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "openai": "^4.24.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.6",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}
+
+// ========== tsconfig.json ==========
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+
+// ========== .env.example ==========
+SUPABASE_URL=https://iimsjxxxazimbczimtd.supabase.co
+SUPABASE_ANON_KEY=your_anon_key_here
+SUPABASE_SERVICE_KEY=your_service_key_here
+OPENAI_API_KEY=your_openai_key_here
+PORT=8080
+NODE_ENV=development
+
+
+// ---------- SRC TYPESCRIPT FILES ----------
+
+
+// ====================================================
+// FILE: src/index.ts
+// ====================================================
+
+import express, { Request, Response } from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import chatRoutes from './routes/chat';
+import goalRoutes from './routes/goals';
+import scheduleRoutes from './routes/schedule';
+
+dotenv.config();
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+// Routes
+app.use('/api/chat', chatRoutes);
+app.use('/api/goals', goalRoutes);
+app.use('/api/schedule', scheduleRoutes);
+
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    service: 'pepzi-backend',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/', (_req: Request, res: Response) => {
+  res.json({
+    message: 'Pepzi Life OS API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      chat: '/api/chat',
+      goals: '/api/goals',
+      'goals.from-dreams': '/api/goals/from-dreams',
+      'goals.plan': '/api/goals/:id/plan',
+      schedule: '/api/schedule',
+      'schedule.today': '/api/schedule/today'
+    }
+  });
+});
+
+const port = process.env.PORT || 8080;
+app.listen(port, () => {
+  console.log('🚀 Pepzi Backend starting...');
+  console.log(`📡 Server running on port ${port}`);
+  console.log(`✅ Ready to receive requests`);
+  console.log(`💬 Chat: http://localhost:${port}/api/chat`);
+  console.log(`🎯 Goals: http://localhost:${port}/api/goals`);
+  console.log(`📅 Schedule: http://localhost:${port}/api/schedule`);
+});
+
+
+// ====================================================
+// FILE: src/routes/chat.ts
+// ====================================================
+
+import { Router, Request, Response } from 'express';
+import { supabase } from '../services/supabase';
+import { extractIntents } from '../services/openai';
+import { buildUserContext } from '../services/contextBuilder';
+import { createLog } from '../services/logger';
+import { parseRelativeTime, parseTime, combineDateAndTime } from '../utils/timeParser';
+
+const router = Router();
+
+/**
+ * POST /api/chat
+ * Main conversational endpoint - processes intents and executes actions
+ */
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const { user_id, message } = req.body;
+
+    if (!user_id || !message) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'message']
+      });
+    }
+
+    console.log(`💬 Chat request from user ${user_id}: "${message}"`);
+
+    // Build context
+    const context = await buildUserContext(user_id);
+
+    // Extract intents using AI
+    const aiResponse = await extractIntents(message, context);
+    console.log('🤖 AI response:', JSON.stringify(aiResponse, null, 2));
+
+    // Save user message
+    await supabase.from('messages').insert({
+      user_id,
+      speaker: 'user',
+      message,
+      timestamp: new Date().toISOString()
+    });
+
+    // Process intents and execute actions
+    const actionsTaken: any[] = [];
+    let scheduleRefresh = false;
+    let goalsRefresh = false;
+
+    if (aiResponse.intents && Array.isArray(aiResponse.intents)) {
+      for (const intent of aiResponse.intents) {
+        try {
+          switch (intent.type) {
+            
+            case 'log_activity':
+              // User is logging something they did
+              const logResult = await handleLogActivity(user_id, intent.data, context);
+              actionsTaken.push({ type: 'log_created', data: logResult });
+              goalsRefresh = true;
+              break;
+
+            case 'reschedule_block':
+              // User wants to move a scheduled activity
+              const rescheduleResult = await handleReschedule(user_id, intent.data, context);
+              actionsTaken.push({ type: 'schedule_updated', data: rescheduleResult });
+              scheduleRefresh = true;
+              break;
+
+            case 'create_block':
+              // User wants to add a new activity
+              const createResult = await handleCreateBlock(user_id, intent.data);
+              actionsTaken.push({ type: 'schedule_created', data: createResult });
+              scheduleRefresh = true;
+              break;
+
+            case 'query_progress':
+              // User is asking about progress (no action needed)
+              break;
+
+            case 'general_chat':
+              // Just conversation (no action needed)
+              break;
+
+            default:
+              console.log(`⚠️ Unknown intent type: ${intent.type}`);
+          }
+        } catch (intentError: any) {
+          console.error(`❌ Error processing intent ${intent.type}:`, intentError);
+          actionsTaken.push({
+            type: 'error',
+            intent: intent.type,
+            error: intentError.message
+          });
+        }
+      }
+    }
+
+    // Save assistant message
+    await supabase.from('messages').insert({
+      user_id,
+      speaker: 'pepzi',
+      message: aiResponse.response || 'I understand.',
+      extracted_data: aiResponse.intents,
+      timestamp: new Date().toISOString()
+    });
+
+    // Return response
+    return res.json({
+      response: aiResponse.response,
+      intents: aiResponse.intents,
+      actions_taken: actionsTaken,
+      ui_updates: {
+        schedule_refresh: scheduleRefresh,
+        goals_refresh: goalsRefresh
+      }
+    });
+
+  } catch (error: any) {
+    console.error('❌ Chat endpoint error:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Handle log_activity intent
+ */
+async function handleLogActivity(userId: string, data: any, context: any) {
+  // Determine which goal this relates to (if any)
+  let goalId = null;
+
+  // Try to match activity to a goal
+  if (data.activity_type === 'run' || data.activity_type === 'workout') {
+    const fitnessGoal = context.goals.find((g: any) => g.category === 'fitness');
+    goalId = fitnessGoal?.id || null;
+  }
+
+  // Create log entry
+  const log = await createLog(
+    userId,
+    goalId,
+    data.activity_type || 'general',
+    data,
+    'user_message'
+  );
+
+  return {
+    log_id: log.id,
+    goal_id: goalId,
+    logged_at: log.timestamp
+  };
+}
+
+/**
+ * Handle reschedule_block intent
+ */
+async function handleReschedule(userId: string, data: any, context: any) {
+  // Find the block to reschedule
+  const targetDate = parseRelativeTime(data.new_time || data.day_reference || 'tomorrow');
+  
+  if (!targetDate) {
+    throw new Error('Could not parse new time');
+  }
+
+  // Find blocks matching the description
+  const { data: blocks, error } = await supabase
+    .from('schedule_blocks')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('status', 'scheduled')
+    .order('scheduled_start', { ascending: true })
+    .limit(10);
+
+  if (error) throw error;
+
+  if (!blocks || blocks.length === 0) {
+    throw new Error('No scheduled blocks found to reschedule');
+  }
+
+  // For now, reschedule the first matching block
+  // (In Phase 4, we'll make this smarter)
+  const blockToReschedule = blocks[0];
+
+  // Parse time if provided
+  let finalDateTime = targetDate;
+  if (data.time) {
+    const timeObj = parseTime(data.time);
+    if (timeObj) {
+      finalDateTime = combineDateAndTime(targetDate, timeObj);
+    }
+  }
+
+  // Update the block
+  const { data: updatedBlock, error: updateError } = await supabase
+    .from('schedule_blocks')
+    .update({
+      scheduled_start: finalDateTime.toISOString(),
+      status: 'rescheduled'
+    })
+    .eq('id', blockToReschedule.id)
+    .select()
+    .single();
+
+  if (updateError) throw updateError;
+
+  return {
+    block_id: updatedBlock.id,
+    old_time: blockToReschedule.scheduled_start,
+    new_time: updatedBlock.scheduled_start
+  };
+}
+
+/**
+ * Handle create_block intent
+ */
+async function handleCreateBlock(userId: string, data: any) {
+  // Parse when to schedule it
+  const scheduledDate = parseRelativeTime(data.day_reference || data.when || 'today');
+  
+  if (!scheduledDate) {
+    throw new Error('Could not parse schedule time');
+  }
+
+  // Parse time if provided
+  let finalDateTime = scheduledDate;
+  if (data.time) {
+    const timeObj = parseTime(data.time);
+    if (timeObj) {
+      finalDateTime = combineDateAndTime(scheduledDate, timeObj);
+    }
+  }
+
+  // Create the block
+  const { data: block, error } = await supabase
+    .from('schedule_blocks')
+    .insert({
+      user_id: userId,
+      goal_id: data.goal_id || null,
+      type: data.activity || 'activity',
+      scheduled_start: finalDateTime.toISOString(),
+      duration_mins: data.duration_minutes || 60,
+      notes: data.description || null,
+      flexibility: 'movable',
+      created_by: 'user',
+      status: 'scheduled'
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return {
+    block_id: block.id,
+    scheduled_time: block.scheduled_start,
+    duration: block.duration_mins
+  };
+}
+
+export default router;
+
+
+// ====================================================
+// FILE: src/routes/goals.ts
+// ====================================================
+
+import { Router, Request, Response } from 'express';
+import { supabase } from '../services/supabase';
+import { simpleCompletion } from '../services/openai';
+
+const router = Router();
+
+/**
+ * POST /api/goals/from-dreams
+ * Extract goals from free-form text
+ */
+router.post('/from-dreams', async (req: Request, res: Response) => {
+  try {
+    const { user_id, text } = req.body;
+
+    if (!user_id || !text) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'text']
+      });
+    }
+
+    console.log(`🎯 Extracting goals from dreams for user ${user_id}`);
+
+    const prompt = `Extract goals from this text and return as JSON array.
+
+Text: "${text}"
+
+Return JSON in this exact format:
+{
+  "goals": [
+    {
+      "name": "Goal name",
+      "category": "fitness|money|skill|social|travel|habit|experience",
+      "description": "Brief description",
+      "target_date": "YYYY-MM-DD or null",
+      "priority": "high|medium|low"
+    }
+  ]
+}
+
+Only return valid JSON, no other text.`;
+
+    const response = await simpleCompletion(prompt);
+    
+    let cleanResponse = response.trim();
+    if (cleanResponse.startsWith('```json')) {
+      cleanResponse = cleanResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+    }
+    
+    const parsed = JSON.parse(cleanResponse);
+    const goals = parsed.goals || [];
+
+    console.log(`✅ Extracted ${goals.length} goals`);
+
+    return res.json({
+      goals,
+      message: `Found ${goals.length} goals. Review and confirm to save.`
+    });
+
+  } catch (error: any) {
+    console.error('❌ Goal extraction error:', error);
+    return res.status(500).json({
+      error: 'Failed to extract goals',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/goals
+ * Create a new goal
+ */
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const { user_id, name, category, target_date, description } = req.body;
+
+    if (!user_id || !name || !category) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'name', 'category']
+      });
+    }
+
+    const { data: goal, error } = await supabase
+      .from('goals')
+      .insert({
+        user_id,
+        name,
+        category,
+        target_date: target_date || null,
+        status: 'active',
+        plan: {
+          description: description || '',
+          created_at: new Date().toISOString()
+        }
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`✅ Created goal: ${name}`);
+
+    return res.json({
+      goal,
+      message: 'Goal created successfully'
+    });
+
+  } catch (error: any) {
+    console.error('❌ Goal creation error:', error);
+    return res.status(500).json({
+      error: 'Failed to create goal',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/goals
+ * Get user's goals
+ */
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const { user_id, status } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({
+        error: 'Missing user_id query parameter'
+      });
+    }
+
+    let query = supabase
+      .from('goals')
+      .select(`
+        *,
+        micro_goals (*)
+      `)
+      .eq('user_id', user_id as string);
+
+    if (status) {
+      query = query.eq('status', status as string);
+    }
+
+    const { data: goals, error } = await query.order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return res.json({
+      goals: goals || [],
+      count: goals?.length || 0
+    });
+
+  } catch (error: any) {
+    console.error('❌ Goals fetch error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch goals',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/goals/:id/plan
+ * Generate training plan for a goal
+ */
+router.post('/:id/plan', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { context } = req.body;
+
+    const { data: goal, error: goalError } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (goalError) throw goalError;
+    if (!goal) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+
+    console.log(`📋 Generating plan for: ${goal.name}`);
+
+    const prompt = `Create a training plan for this goal:
+
+Goal: ${goal.name}
+Category: ${goal.category}
+Target Date: ${goal.target_date || 'Not specified'}
+Context: ${context || 'None provided'}
+
+Return JSON with this structure:
+{
+  "weekly_hours": 5,
+  "total_estimated_hours": 200,
+  "micro_goals": [
+    {
+      "name": "Micro-goal name",
+      "order_index": 1,
+      "completion_criteria": {
+        "type": "performance|counter|streak|binary",
+        "description": "What needs to be achieved"
+      }
+    }
+  ],
+  "phases": [
+    {
+      "name": "Phase name",
+      "duration_weeks": 4,
+      "focus": "What to focus on"
+    }
+  ]
+}
+
+Only return valid JSON.`;
+
+    const response = await simpleCompletion(prompt);
+    let cleanResponse = response.trim();
+    if (cleanResponse.startsWith('```json')) {
+      cleanResponse = cleanResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+    }
+    
+    const plan = JSON.parse(cleanResponse);
+
+    const { error: updateError } = await supabase
+      .from('goals')
+      .update({ plan })
+      .eq('id', id);
+
+    if (updateError) throw updateError;
+
+    if (plan.micro_goals && plan.micro_goals.length > 0) {
+      const microGoals = plan.micro_goals.map((mg: any) => ({
+        goal_id: id,
+        name: mg.name,
+        order_index: mg.order_index,
+        completion_criteria: mg.completion_criteria
+      }));
+
+      const { error: mgError } = await supabase
+        .from('micro_goals')
+        .insert(microGoals);
+
+      if (mgError) throw mgError;
+    }
+
+    console.log(`✅ Plan created with ${plan.micro_goals?.length || 0} micro-goals`);
+
+    return res.json({
+      plan,
+      message: 'Training plan generated successfully'
+    });
+
+  } catch (error: any) {
+    console.error('❌ Plan generation error:', error);
+    return res.status(500).json({
+      error: 'Failed to generate plan',
+      message: error.message
+    });
+  }
+});
+
+export default router;
+
+
+// ====================================================
+// FILE: src/routes/schedule.ts
+// ====================================================
+
+import { Router, Request, Response } from 'express';
+import { supabase } from '../services/supabase';
+import { parseRelativeTime, parseTime, combineDateAndTime } from '../utils/timeParser';
+import { rescheduleBlock } from '../services/planner';
+
+const router = Router();
+
+/**
+ * GET /api/schedule
+ * Get schedule blocks for a date range
+ */
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const { user_id, start_date, end_date } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({
+        error: 'Missing user_id query parameter'
+      });
+    }
+
+    let query = supabase
+      .from('schedule_blocks')
+      .select(`
+        *,
+        goals (name, category)
+      `)
+      .eq('user_id', user_id as string);
+
+    if (start_date) {
+      query = query.gte('scheduled_start', start_date as string);
+    }
+
+    if (end_date) {
+      query = query.lte('scheduled_start', end_date as string);
+    }
+
+    const { data: blocks, error } = await query.order('scheduled_start', { ascending: true });
+
+    if (error) throw error;
+
+    return res.json({
+      blocks: blocks || [],
+      count: blocks?.length || 0
+    });
+
+  } catch (error: any) {
+    console.error('❌ Schedule fetch error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch schedule',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/schedule/today
+ * Get today's schedule
+ */
+router.get('/today', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({
+        error: 'Missing user_id query parameter'
+      });
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data: blocks, error } = await supabase
+      .from('schedule_blocks')
+      .select(`
+        *,
+        goals (name, category)
+      `)
+      .eq('user_id', user_id as string)
+      .gte('scheduled_start', `${today}T00:00:00`)
+      .lt('scheduled_start', `${today}T23:59:59`)
+      .order('scheduled_start', { ascending: true });
+
+    if (error) throw error;
+
+    return res.json({
+      date: today,
+      blocks: blocks || [],
+      count: blocks?.length || 0
+    });
+
+  } catch (error: any) {
+    console.error('❌ Today schedule error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch today\'s schedule',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/schedule
+ * Create a new schedule block
+ */
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const {
+      user_id,
+      goal_id,
+      type,
+      scheduled_start,
+      duration_mins,
+      notes
+    } = req.body;
+
+    if (!user_id || !type || !scheduled_start || !duration_mins) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'type', 'scheduled_start', 'duration_mins']
+      });
+    }
+
+    const { data: block, error } = await supabase
+      .from('schedule_blocks')
+      .insert({
+        user_id,
+        goal_id: goal_id || null,
+        type,
+        scheduled_start,
+        duration_mins,
+        notes: notes || null,
+        flexibility: 'movable',
+        created_by: 'user',
+        status: 'scheduled'
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`✅ Created schedule block: ${type} at ${scheduled_start}`);
+
+    return res.json({
+      block,
+      message: 'Schedule block created'
+    });
+
+  } catch (error: any) {
+    console.error('❌ Schedule creation error:', error);
+    return res.status(500).json({
+      error: 'Failed to create schedule block',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * PATCH /api/schedule/:id/reschedule
+ * Reschedule a block
+ */
+router.patch('/:id/reschedule', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { new_start_time } = req.body;
+
+    if (!new_start_time) {
+      return res.status(400).json({
+        error: 'Missing new_start_time'
+      });
+    }
+
+    const newDate = new Date(new_start_time);
+    const block = await rescheduleBlock(id, newDate);
+
+    return res.json({
+      block,
+      message: 'Block rescheduled successfully'
+    });
+
+  } catch (error: any) {
+    console.error('❌ Reschedule error:', error);
+    return res.status(500).json({
+      error: 'Failed to reschedule block',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * DELETE /api/schedule/:id
+ * Delete a schedule block
+ */
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const { error } = await supabase
+      .from('schedule_blocks')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+
+    console.log(`🗑️ Deleted schedule block: ${id}`);
+
+    return res.json({
+      message: 'Schedule block deleted'
+    });
+
+  } catch (error: any) {
+    console.error('❌ Delete error:', error);
+    return res.status(500).json({
+      error: 'Failed to delete block',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * PATCH /api/schedule/:id/complete
+ * Mark a block as completed
+ */
+router.patch('/:id/complete', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const { data: block, error } = await supabase
+      .from('schedule_blocks')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`✅ Marked block complete: ${id}`);
+
+    return res.json({
+      block,
+      message: 'Block marked as completed'
+    });
+
+  } catch (error: any) {
+    console.error('❌ Complete error:', error);
+    return res.status(500).json({
+      error: 'Failed to mark block complete',
+      message: error.message
+    });
+  }
+});
+
+export default router;
+
+
+// ====================================================
+// FILE: src/services/contextBuilder.ts
+// ====================================================
+
+import { supabase } from './supabase';
+
+/**
+ * Build context for AI from user's data
+ * This gives Pepzi awareness of the user's goals, schedule, and recent activity
+ */
+export async function buildUserContext(userId: string) {
+  try {
+    // Get user info
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    // Get active goals
+    const { data: goals } = await supabase
+      .from('goals')
+      .select(`
+        *,
+        micro_goals (*)
+      `)
+      .eq('user_id', userId)
+      .eq('status', 'active');
+
+    // Get today's schedule
+    const today = new Date().toISOString().split('T')[0];
+    const { data: todaySchedule } = await supabase
+      .from('schedule_blocks')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('scheduled_start', `${today}T00:00:00`)
+      .lt('scheduled_start', `${today}T23:59:59`)
+      .order('scheduled_start', { ascending: true });
+
+    // Get recent logs (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const { data: recentLogs } = await supabase
+      .from('log_entries')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('timestamp', sevenDaysAgo.toISOString())
+      .order('timestamp', { ascending: false })
+      .limit(20);
+
+    // Get recent messages (last 10)
+    const { data: recentMessages } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('user_id', userId)
+      .order('timestamp', { ascending: false })
+      .limit(10);
+
+    return {
+      user,
+      goals: goals || [],
+      todaySchedule: todaySchedule || [],
+      recentLogs: recentLogs || [],
+      recentMessages: (recentMessages || []).reverse(), // Oldest first for conversation flow
+      currentDate: new Date().toISOString(),
+      currentTime: new Date().toTimeString().split(' ')[0]
+    };
+  } catch (error) {
+    console.error('Error building context:', error);
+    throw error;
+  }
+}
+
+/**
+ * Format context for display/logging
+ */
+export function formatContextSummary(context: any): string {
+  return `
+User: ${context.user?.name || 'Unknown'}
+Active Goals: ${context.goals?.length || 0}
+Today's Schedule: ${context.todaySchedule?.length || 0} blocks
+Recent Logs: ${context.recentLogs?.length || 0}
+`.trim();
+}
+
+
+// ====================================================
+// FILE: src/services/logger.ts
+// ====================================================
+
+import { supabase } from './supabase';
+
+/**
+ * Log an activity
+ */
+export async function createLog(
+  userId: string,
+  goalId: string | null,
+  type: string,
+  data: any,
+  source: string = 'user_message'
+) {
+  try {
+    const { data: log, error } = await supabase
+      .from('log_entries')
+      .insert({
+        user_id: userId,
+        goal_id: goalId,
+        timestamp: new Date().toISOString(),
+        type,
+        data,
+        source
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`📝 Logged ${type}:`, data);
+
+    // Check if this log completes any micro-goals
+    if (goalId) {
+      await checkMicroGoalCompletion(goalId, data);
+    }
+
+    return log;
+  } catch (error) {
+    console.error('Error creating log:', error);
+    throw error;
+  }
+}
+
+/**
+ * Check if a log entry completes any micro-goals
+ */
+async function checkMicroGoalCompletion(goalId: string, logData: any) {
+  try {
+    // Get incomplete micro-goals for this goal
+    const { data: microGoals, error } = await supabase
+      .from('micro_goals')
+      .select('*')
+      .eq('goal_id', goalId)
+      .eq('completed', false)
+      .order('order_index', { ascending: true });
+
+    if (error) throw error;
+    if (!microGoals || microGoals.length === 0) return;
+
+    // Check each micro-goal's completion criteria
+    for (const microGoal of microGoals) {
+      const criteria = microGoal.completion_criteria;
+      let isComplete = false;
+
+      // Check different types of criteria
+      if (criteria.type === 'performance') {
+        // Example: run 5k under 24:00
+        if (criteria.metric && logData[criteria.metric]) {
+          const value = logData[criteria.metric];
+          const threshold = criteria.threshold;
+          
+          if (criteria.operator === 'less_than' && value < threshold) {
+            isComplete = true;
+          } else if (criteria.operator === 'greater_than' && value > threshold) {
+            isComplete = true;
+          } else if (criteria.operator === 'equals' && value === threshold) {
+            isComplete = true;
+          }
+        }
+      }
+
+      if (isComplete) {
+        // Mark micro-goal as complete
+        await supabase
+          .from('micro_goals')
+          .update({
+            completed: true,
+            completed_at: new Date().toISOString(),
+            completion_data: logData
+          })
+          .eq('id', microGoal.id);
+
+        console.log(`🎉 Micro-goal completed: ${microGoal.name}`);
+
+        // Update goal progress
+        await updateGoalProgress(goalId);
+      }
+    }
+  } catch (error) {
+    console.error('Error checking micro-goal completion:', error);
+  }
+}
+
+/**
+ * Update goal progress based on completed micro-goals
+ */
+async function updateGoalProgress(goalId: string) {
+  try {
+    // Get all micro-goals for this goal
+    const { data: microGoals, error } = await supabase
+      .from('micro_goals')
+      .select('*')
+      .eq('goal_id', goalId);
+
+    if (error) throw error;
+    if (!microGoals || microGoals.length === 0) return;
+
+    const totalMicroGoals = microGoals.length;
+    const completedMicroGoals = microGoals.filter(mg => mg.completed).length;
+    const percentComplete = Math.round((completedMicroGoals / totalMicroGoals) * 100);
+
+    // Update goal progress
+    await supabase
+      .from('goals')
+      .update({
+        progress: {
+          percent_complete: percentComplete,
+          completed_micro_goals: completedMicroGoals,
+          total_micro_goals: totalMicroGoals,
+          updated_at: new Date().toISOString()
+        }
+      })
+      .eq('id', goalId);
+
+    console.log(`📊 Goal progress updated: ${percentComplete}%`);
+  } catch (error) {
+    console.error('Error updating goal progress:', error);
+  }
+}
+
+/**
+ * Get recent logs for a user
+ */
+export async function getRecentLogs(userId: string, days: number = 7) {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+
+    const { data: logs, error } = await supabase
+      .from('log_entries')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('timestamp', cutoffDate.toISOString())
+      .order('timestamp', { ascending: false });
+
+    if (error) throw error;
+
+    return logs || [];
+  } catch (error) {
+    console.error('Error fetching logs:', error);
+    return [];
+  }
+}
+
+
+// ====================================================
+// FILE: src/services/openai.ts
+// ====================================================
+
+import OpenAI from 'openai';
+
+// Initialize OpenAI client
+const apiKey = process.env.OPENAI_API_KEY;
+
+if (!apiKey) {
+  throw new Error('Missing OPENAI_API_KEY in .env file');
+}
+
+export const openai = new OpenAI({ apiKey });
+
+/**
+ * Extract structured intents from user message
+ * This is the core of Pepzi's natural language understanding
+ */
+export async function extractIntents(
+  userMessage: string,
+  context: any
+): Promise<any> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are Pepzi, an AI life operating system assistant.
+
+Your job is to understand natural language requests and extract structured intents.
+
+Available intent types:
+- log_activity: User is logging something they did
+- reschedule_block: User wants to move a scheduled activity
+- create_block: User wants to add a new activity
+- query_progress: User is asking about their progress
+- general_chat: General conversation
+
+Current context:
+- Today: ${new Date().toISOString().split('T')[0]}
+- User goals: ${JSON.stringify(context.goals || [])}
+- Today's schedule: ${JSON.stringify(context.todaySchedule || [])}
+
+Extract intents from the user's message and respond with JSON only.
+
+Format:
+{
+  "intents": [
+    {
+      "type": "intent_type",
+      "data": { ... relevant data ... }
+    }
+  ],
+  "response": "Natural language response to user"
+}`
+        },
+        {
+          role: 'user',
+          content: userMessage
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 1000
+    });
+
+    const content = response.choices[0]?.message?.content || '{}';
+    
+    // Try to parse JSON, stripping markdown if present
+    let cleanContent = content.trim();
+    if (cleanContent.startsWith('```json')) {
+      cleanContent = cleanContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+    }
+    
+    return JSON.parse(cleanContent);
+  } catch (error) {
+    console.error('OpenAI API error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate text embeddings for semantic memory
+ */
+export async function createEmbedding(text: string): Promise<number[]> {
+  try {
+    const response = await openai.embeddings.create({
+      model: 'text-embedding-3-small',
+      input: text
+    });
+    
+    return response.data[0].embedding;
+  } catch (error) {
+    console.error('Embedding creation error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Simple chat completion (for general responses)
+ */
+export async function simpleCompletion(
+  message: string,
+  systemPrompt?: string
+): Promise<string> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
+        { role: 'user' as const, content: message }
+      ],
+      temperature: 0.7,
+      max_tokens: 500
+    });
+    
+    return response.choices[0]?.message?.content || 'No response generated.';
+  } catch (error) {
+    console.error('Simple completion error:', error);
+    throw error;
+  }
+}
+
+
+// ====================================================
+// FILE: src/services/planner.ts
+// ====================================================
+
+import { supabase } from './supabase';
+import { addDays, startOfDay, setHours } from 'date-fns';
+
+/**
+ * Generate weekly schedule for a user
+ */
+export async function generateWeeklySchedule(userId: string) {
+  try {
+    console.log(`📅 Generating weekly schedule for user ${userId}`);
+
+    const { data: goals, error } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active');
+
+    if (error) throw error;
+    if (!goals || goals.length === 0) {
+      return { message: 'No active goals found' };
+    }
+
+    const totalHoursNeeded = goals.reduce((sum, goal) => {
+      return sum + (goal.plan?.weekly_hours || 0);
+    }, 0);
+
+    console.log(`⏰ Total weekly hours needed: ${totalHoursNeeded}`);
+
+    const blocks: any[] = [];
+    const today = startOfDay(new Date());
+
+    for (const goal of goals) {
+      const weeklyHours = goal.plan?.weekly_hours || 0;
+      if (weeklyHours === 0) continue;
+
+      const sessionsPerWeek = Math.ceil(weeklyHours / 1.5);
+      const hoursPerSession = weeklyHours / sessionsPerWeek;
+
+      for (let i = 0; i < sessionsPerWeek && i < 7; i++) {
+        const day = addDays(today, i);
+        const startTime = setHours(day, 9 + (i * 2) % 12);
+
+        blocks.push({
+          user_id: userId,
+          goal_id: goal.id,
+          type: getBlockType(goal.category),
+          scheduled_start: startTime.toISOString(),
+          duration_mins: Math.round(hoursPerSession * 60),
+          flexibility: 'movable',
+          created_by: 'ai',
+          status: 'scheduled'
+        });
+      }
+    }
+
+    const { data: savedBlocks, error: saveError } = await supabase
+      .from('schedule_blocks')
+      .insert(blocks)
+      .select();
+
+    if (saveError) throw saveError;
+
+    console.log(`✅ Created ${savedBlocks?.length || 0} schedule blocks`);
+
+    return {
+      blocks: savedBlocks,
+      total_hours: totalHoursNeeded,
+      message: `Generated ${savedBlocks?.length} schedule blocks for the week`
+    };
+
+  } catch (error) {
+    console.error('Error generating schedule:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get block type based on goal category
+ */
+function getBlockType(category: string): string {
+  const typeMap: { [key: string]: string } = {
+    'fitness': 'workout',
+    'money': 'deep_work',
+    'skill': 'practice',
+    'social': 'social',
+    'travel': 'planning',
+    'habit': 'routine',
+    'experience': 'event'
+  };
+  return typeMap[category] || 'activity';
+}
+
+/**
+ * Reschedule a block
+ */
+export async function rescheduleBlock(
+  blockId: string,
+  newStartTime: Date
+) {
+  try {
+    const { data: block, error } = await supabase
+      .from('schedule_blocks')
+      .update({
+        scheduled_start: newStartTime.toISOString(),
+        status: 'rescheduled'
+      })
+      .eq('id', blockId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`🔄 Rescheduled block to ${newStartTime.toISOString()}`);
+
+    return block;
+  } catch (error) {
+    console.error('Error rescheduling block:', error);
+    throw error;
+  }
+}
+
+
+// ====================================================
+// FILE: src/services/supabase.ts
+// ====================================================
+
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+
+// Load .env file FIRST before reading any environment variables
+dotenv.config();
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+
+console.log('🔍 Loading Supabase credentials...');
+console.log('   URL:', supabaseUrl ? '✅ Present' : '❌ Missing');
+console.log('   Service Key:', supabaseServiceKey ? '✅ Present' : '❌ Missing');
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error('Missing Supabase credentials in .env file');
+}
+
+export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  }
+});
+
+export async function testConnection(): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('users').select('count').limit(1);
+    if (error) {
+      console.error('❌ Supabase connection failed:', error.message);
+      return false;
+    }
+    console.log('✅ Supabase connected');
+    return true;
+  } catch (err) {
+    console.error('❌ Supabase error:', err);
+    return false;
+  }
+}
+
+
+// ====================================================
+// FILE: src/utils/timeParser.ts
+// ====================================================
+
+import { addDays, addWeeks, addMonths, setDay, parseISO, format } from 'date-fns';
+
+/**
+ * Parse natural language time expressions
+ * Examples: "next Tuesday", "in 3 months", "tomorrow at 7pm"
+ */
+export function parseRelativeTime(
+  expression: string,
+  referenceDate: Date = new Date()
+): Date | null {
+  const lower = expression.toLowerCase().trim();
+
+  // Tomorrow
+  if (lower.includes('tomorrow')) {
+    return addDays(referenceDate, 1);
+  }
+
+  // Today
+  if (lower.includes('today')) {
+    return referenceDate;
+  }
+
+  // Next [day of week]
+  const dayMatch = lower.match(/next (monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
+  if (dayMatch) {
+    const dayMap: { [key: string]: number } = {
+      'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3,
+      'thursday': 4, 'friday': 5, 'saturday': 6
+    };
+    const targetDay = dayMap[dayMatch[1]];
+    return getNextDayOfWeek(referenceDate, targetDay);
+  }
+
+  // In X days
+  const daysMatch = lower.match(/in (\d+) days?/);
+  if (daysMatch) {
+    return addDays(referenceDate, parseInt(daysMatch[1]));
+  }
+
+  // In X weeks
+  const weeksMatch = lower.match(/in (\d+) weeks?/);
+  if (weeksMatch) {
+    return addWeeks(referenceDate, parseInt(weeksMatch[1]));
+  }
+
+  // In X months
+  const monthsMatch = lower.match(/in (\d+) months?/);
+  if (monthsMatch) {
+    return addMonths(referenceDate, parseInt(monthsMatch[1]));
+  }
+
+  // "In a few months" - default to 3
+  if (lower.includes('in a few months')) {
+    return addMonths(referenceDate, 3);
+  }
+
+  // "In a few weeks" - default to 2
+  if (lower.includes('in a few weeks')) {
+    return addWeeks(referenceDate, 2);
+  }
+
+  return null;
+}
+
+/**
+ * Get the next occurrence of a specific day of week
+ */
+function getNextDayOfWeek(date: Date, targetDay: number): Date {
+  const result = new Date(date);
+  const currentDay = date.getDay();
+  const daysToAdd = (targetDay + 7 - currentDay) % 7 || 7;
+  result.setDate(date.getDate() + daysToAdd);
+  return result;
+}
+
+/**
+ * Parse time from text like "at 7pm", "at 14:00"
+ */
+export function parseTime(expression: string): { hours: number; minutes: number } | null {
+  const lower = expression.toLowerCase();
+
+  // Match "7pm", "7:30pm", "19:00"
+  const timeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (!timeMatch) return null;
+
+  let hours = parseInt(timeMatch[1]);
+  const minutes = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
+  const meridiem = timeMatch[3];
+
+  // Convert to 24-hour format
+  if (meridiem === 'pm' && hours !== 12) {
+    hours += 12;
+  } else if (meridiem === 'am' && hours === 12) {
+    hours = 0;
+  }
+
+  return { hours, minutes };
+}
+
+/**
+ * Combine date and time
+ */
+export function combineDateAndTime(
+  date: Date,
+  time: { hours: number; minutes: number }
+): Date {
+  const result = new Date(date);
+  result.setHours(time.hours, time.minutes, 0, 0);
+  return result;
+}
+

@@ -1,0 +1,2547 @@
+🔧 Pepzi snapshot generated on: Mon Nov 24 04:53:42 PM UTC 2025
+
+=== DIRECTORY TREE (max depth 3) ===
+(tree not installed; using find instead)
+.
+./pepzi_snapshot.sh
+./pepzi_snapshot.txt
+./backend
+./backend/package.json
+./backend/pepzi-backend-snapshot-20251121-233505.txt
+./backend/.env
+./backend/ts-node-dev
+./backend/package-lock.json
+./backend/tsconfig.json
+./backend/src
+./backend/src/types
+./backend/src/routes
+./backend/src/index.ts
+./backend/src/services
+./backend/src/utils
+./backend/dist
+./backend/dist/routes
+./backend/dist/services
+./backend/dist/utils
+./backend/dist/index.js
+./backend/Dockerfile
+./backend/.dockerignore
+./backend/pepzi-backend@1.0.0
+./backend/.env.example
+./README.md
+./infra
+./infra/supabase
+./frontend
+./frontend/package.json
+./frontend/pepzi-frontend-snapshot-20251122-080653.txt
+./frontend/types
+./frontend/types/index.ts
+./frontend/postcss.config.mjs
+./frontend/next.config.ts
+./frontend/next.config.mjs
+./frontend/components
+./frontend/components/schedule
+./frontend/components/goals
+./frontend/components/chat
+./frontend/components/Navigation.tsx
+./frontend/components/AvailabilityModal.tsx
+./frontend/components/FeasibilityWidget.tsx
+./frontend/components/ui
+./frontend/package-lock.json
+./frontend/public
+./frontend/public/globe.svg
+./frontend/public/next.svg
+./frontend/public/window.svg
+./frontend/public/vercel.svg
+./frontend/public/file.svg
+./frontend/tsconfig.json
+./frontend/app
+./frontend/app/schedule
+./frontend/app/layout.tsx
+./frontend/app/favicon.ico
+./frontend/app/goals
+./frontend/app/page.tsx
+./frontend/app/globals.css
+./frontend/app/chat
+./frontend/app/today
+./frontend/app/providers.tsx
+./frontend/README.md
+./frontend/next-env.d.ts
+./frontend/lib
+./frontend/lib/types.ts
+./frontend/lib/store.ts
+./frontend/lib/api.ts
+./frontend/hooks
+./frontend/frontend@0.1.0
+
+
+
+=== BACKEND: package.json ===
+{
+  "name": "pepzi-backend",
+  "version": "1.0.0",
+  "description": "Pepzi AI Life OS - Backend API",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "pepzi",
+    "life-os",
+    "ai",
+    "scheduling"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "cors": "^2.8.5",
+    "date-fns": "^3.0.6",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "openai": "^4.24.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.6",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}
+
+--- backend/tsconfig.json ---
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+
+--- backend/src/index.ts ---
+import express, { Request, Response } from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import chatRoutes from './routes/chat';
+import goalRoutes from './routes/goals';
+import scheduleRoutes from './routes/schedule';
+import memoryRoutes from './routes/memory';
+import availabilityRoutes from './routes/availability';
+
+dotenv.config();
+
+const app = express();
+
+// CORS Configuration - Dynamic origin checker for Cloud Shell
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like curl, mobile apps)
+    if (!origin) return callback(null, true);
+    
+    // Remove query parameters from origin for matching
+    const cleanOrigin = origin.split('?')[0];
+    
+    // Allowed patterns
+    const allowedPatterns = [
+      /^https?:\/\/localhost:\d+$/,
+      /^https:\/\/3000-cs-291763640218-default\.cs-europe-west1-onse\.cloudshell\.dev$/,
+      /^https:\/\/3001-cs-291763640218-default\.cs-europe-west1-onse\.cloudshell\.dev$/,
+      /^https:\/\/8080-cs-291763640218-default\.cs-europe-west1-onse\.cloudshell\.dev$/
+    ];
+    
+    const isAllowed = allowedPatterns.some(pattern => pattern.test(cleanOrigin));
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log('❌ CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(express.json());
+
+// Routes
+app.use('/api/chat', chatRoutes);
+app.use('/api/goals', goalRoutes);
+app.use('/api/schedule', scheduleRoutes);
+app.use('/api/memory', memoryRoutes);
+app.use('/api/availability', availabilityRoutes);
+
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    service: 'pepzi-backend',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/', (_req: Request, res: Response) => {
+  res.json({
+    message: 'Pepzi Life OS API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      chat: '/api/chat',
+      goals: '/api/goals',
+      'goals.from-dreams': '/api/goals/from-dreams',
+      'goals.plan': '/api/goals/:id/plan',
+      schedule: '/api/schedule',
+      'schedule.today': '/api/schedule/today',
+      memory: '/api/memory',
+      'memory.recent': '/api/memory/recent',
+      'memory.search': '/api/memory/search',
+      availability: '/api/availability'
+    }
+  });
+});
+
+const port = process.env.PORT || 8080;
+app.listen(port, () => {
+  console.log('🚀 Pepzi Backend starting...');
+  console.log(`📡 Server running on port ${port}`);
+  console.log(`✅ Ready to receive requests`);
+  console.log(`💬 Chat: http://localhost:${port}/api/chat`);
+  console.log(`🎯 Goals: http://localhost:${port}/api/goals`);
+  console.log(`📅 Schedule: http://localhost:${port}/api/schedule`);
+  console.log(`🧠 Memory: http://localhost:${port}/api/memory`);
+  console.log(`⏰ Availability: http://localhost:${port}/api/availability`);
+});
+--- backend/src/routes (first 160 lines of each) ---
+
+##### backend/src/routes/availability.ts #####
+import { Router, Request, Response } from 'express';
+import { supabase } from '../services/supabase';
+import { simpleCompletion } from '../services/openai';
+
+const router = Router();
+
+/**
+ * POST /api/availability/extract
+ * Extract availability from natural language
+ */
+router.post('/extract', async (req: Request, res: Response) => {
+  try {
+    const { user_id, text } = req.body;
+
+    if (!user_id || !text) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'text']
+      });
+    }
+
+    console.log(`📅 Extracting availability for user ${user_id}`);
+
+    const prompt = `Extract weekly availability from this text and return as JSON.
+
+Text: "${text}"
+
+IMPORTANT: 
+- wake_time is when they wake up (e.g., "07:00" for 7am)
+- sleep_time is when they go to sleep at NIGHT (e.g., "23:00" for 11pm, NOT "12:00" for noon!)
+- If they say "sleep at 11pm" that's "23:00"
+- If they say "sleep at midnight" that's "00:00"
+
+Return JSON in this exact format:
+{
+  "wake_time": "HH:MM",
+  "sleep_time": "HH:MM",
+  "work_schedule": {
+    "monday": {"start": "HH:MM", "end": "HH:MM"} or null,
+    "tuesday": {"start": "HH:MM", "end": "HH:MM"} or null,
+    "wednesday": {"start": "HH:MM", "end": "HH:MM"} or null,
+    "thursday": {"start": "HH:MM", "end": "HH:MM"} or null,
+    "friday": {"start": "HH:MM", "end": "HH:MM"} or null,
+    "saturday": {"start": "HH:MM", "end": "HH:MM"} or null,
+    "sunday": {"start": "HH:MM", "end": "HH:MM"} or null
+  },
+  "daily_commute_mins": number,
+  "fixed_commitments": [
+    {"day": "thursday", "start": "HH:MM", "end": "HH:MM", "name": "Activity name"}
+  ],
+  "preferred_workout_time": "morning|afternoon|evening|flexible"
+}
+
+Only return valid JSON, no other text.`;
+
+    const response = await simpleCompletion(prompt);
+    
+    let cleanResponse = response.trim();
+    if (cleanResponse.startsWith('```json')) {
+      cleanResponse = cleanResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+    }
+    
+    const availability = JSON.parse(cleanResponse);
+
+    // Calculate free hours
+    const freeHours = calculateFreeHours(availability);
+    availability.total_free_hours_per_week = freeHours.free;
+    availability.total_busy_hours_per_week = freeHours.busy;
+
+    console.log(`✅ Extracted availability: ${freeHours.free}h free per week`);
+
+    return res.json({
+      availability,
+      summary: {
+        free_hours: freeHours.free,
+        busy_hours: freeHours.busy,
+        is_feasible: freeHours.free > 10 // At least 10 hours free
+      }
+    });
+
+  } catch (error: any) {
+    console.error('❌ Availability extraction error:', error);
+    return res.status(500).json({
+      error: 'Failed to extract availability',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/availability
+ * Save user availability
+ */
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const { user_id, ...availabilityData } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'Missing user_id' });
+    }
+
+    // Upsert (insert or update)
+    const { data, error } = await supabase
+      .from('user_availability')
+      .upsert({
+        user_id,
+        ...availabilityData,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'user_id'
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`✅ Saved availability for user ${user_id}`);
+
+    return res.json({
+      availability: data,
+      message: 'Availability saved successfully'
+    });
+
+  } catch (error: any) {
+    console.error('❌ Save availability error:', error);
+    return res.status(500).json({
+      error: 'Failed to save availability',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/availability
+ * Get user availability
+ */
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'Missing user_id' });
+    }
+
+    const { data, error } = await supabase
+      .from('user_availability')
+      .select('*')
+      .eq('user_id', user_id as string)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error; // PGRST116 = not found
+
+    return res.json({
+      availability: data || null,
+      has_availability: !!data
+    });
+
+  } catch (error: any) {
+    console.error('❌ Get availability error:', error);
+    return res.status(500).json({
+
+##### backend/src/routes/chat.ts #####
+import { Router, Request, Response } from 'express';
+import { supabase } from '../services/supabase';
+import { extractIntents } from '../services/openai';
+import { buildUserContext } from '../services/contextBuilder';
+import { createLog } from '../services/logger';
+import { parseRelativeTime, parseTime, combineDateAndTime } from '../utils/timeParser';
+import { buildMemoryContext, storeAchievement, storeStruggle, storePreference } from '../services/memory';
+
+const router = Router();
+
+/**
+ * POST /api/chat
+ * Main conversational endpoint - processes intents and executes actions
+ * NOW WITH MEMORY INTEGRATION! 🧠
+ */
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const { user_id, message } = req.body;
+
+    if (!user_id || !message) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'message']
+      });
+    }
+
+    console.log(`💬 Chat request from user ${user_id}: "${message}"`);
+
+    // Build context (goals, schedule, logs, etc.)
+    const context = await buildUserContext(user_id);
+
+    // 🧠 NEW: Get relevant memories based on the current message
+    console.log('🧠 Searching for relevant memories...');
+    const memoryContext = await buildMemoryContext(user_id, message);
+
+    // Add memory to context
+    const enhancedContext = {
+      ...context,
+      memories: memoryContext
+    };
+
+    // Extract intents using AI (now with memory context!)
+    const aiResponse = await extractIntents(message, enhancedContext);
+    console.log('🤖 AI response:', JSON.stringify(aiResponse, null, 2));
+
+    // Save user message
+    await supabase.from('messages').insert({
+      user_id,
+      speaker: 'user',
+      message,
+      timestamp: new Date().toISOString()
+    });
+
+    // Process intents and execute actions
+    const actionsTaken: any[] = [];
+    let scheduleRefresh = false;
+    let goalsRefresh = false;
+
+    if (aiResponse.intents && Array.isArray(aiResponse.intents)) {
+      for (const intent of aiResponse.intents) {
+        try {
+          switch (intent.type) {
+            
+            case 'log_activity':
+              // User is logging something they did
+              const logResult = await handleLogActivity(user_id, intent.data, context);
+              actionsTaken.push({ type: 'log_created', data: logResult });
+              goalsRefresh = true;
+              break;
+
+            case 'reschedule_block':
+              // User wants to move a scheduled activity
+              const rescheduleResult = await handleReschedule(user_id, intent.data, context);
+              actionsTaken.push({ type: 'schedule_updated', data: rescheduleResult });
+              scheduleRefresh = true;
+              break;
+
+            case 'create_block':
+              // User wants to add a new activity
+              const createResult = await handleCreateBlock(user_id, intent.data);
+              actionsTaken.push({ type: 'schedule_created', data: createResult });
+              scheduleRefresh = true;
+              break;
+
+            case 'query_progress':
+              // User is asking about progress (no action needed)
+              break;
+
+            case 'general_chat':
+              // Just conversation (no action needed)
+              break;
+
+            // 🧠 NEW: Memory-related intents
+            case 'achievement':
+              await storeAchievement(user_id, intent.data.description, intent.data.goal_id);
+              actionsTaken.push({ type: 'achievement_recorded', data: intent.data });
+              console.log('🏆 Achievement stored in memory');
+              break;
+
+            case 'struggle':
+              await storeStruggle(user_id, intent.data.description, intent.data.goal_id);
+              actionsTaken.push({ type: 'struggle_noted', data: intent.data });
+              console.log('📝 Struggle noted in memory');
+              break;
+
+            case 'preference':
+              await storePreference(user_id, intent.data.description);
+              actionsTaken.push({ type: 'preference_saved', data: intent.data });
+              console.log('⭐ Preference saved to memory');
+              break;
+
+            default:
+              console.log(`⚠️ Unknown intent type: ${intent.type}`);
+          }
+        } catch (intentError: any) {
+          console.error(`❌ Error processing intent ${intent.type}:`, intentError);
+          actionsTaken.push({
+            type: 'error',
+            intent: intent.type,
+            error: intentError.message
+          });
+        }
+      }
+    }
+
+    // Save assistant message
+    await supabase.from('messages').insert({
+      user_id,
+      speaker: 'pepzi',
+      message: aiResponse.response || 'I understand.',
+      extracted_data: aiResponse.intents,
+      timestamp: new Date().toISOString()
+    });
+
+    // Return response
+    return res.json({
+      response: aiResponse.response,
+      intents: aiResponse.intents,
+      actions_taken: actionsTaken,
+      ui_updates: {
+        schedule_refresh: scheduleRefresh,
+        goals_refresh: goalsRefresh
+      }
+    });
+
+  } catch (error: any) {
+    console.error('❌ Chat endpoint error:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Handle log_activity intent
+ */
+async function handleLogActivity(userId: string, data: any, context: any) {
+  // Determine which goal this relates to (if any)
+  let goalId = null;
+
+##### backend/src/routes/goals copy.ts #####
+import { Router, Request, Response } from 'express';
+import { supabase } from '../services/supabase';
+import { openai, simpleCompletion } from '../services/openai';
+
+const router = Router();
+
+/**
+ * Robust JSON fixer - handles common AI JSON errors
+ * Used by /:goalId/generate-plan
+ */
+function fixAndParseJSON(jsonString: string): any {
+  let fixed = jsonString.trim();
+
+  // Remove markdown fences
+  fixed = fixed
+    .replace(/```json\n?/g, '')
+    .replace(/```\n?/g, '')
+    .replace(/```/g, '');
+
+  // Extract JSON object
+  const firstBrace = fixed.indexOf('{');
+  const lastBrace = fixed.lastIndexOf('}');
+  if (firstBrace > 0) fixed = fixed.substring(firstBrace);
+  if (lastBrace > 0) fixed = fixed.substring(0, lastBrace + 1);
+
+  // Fix common JSON errors
+  fixed = fixed
+    // Remove trailing commas in arrays
+    .replace(/,(\s*])/g, '$1')
+    // Remove trailing commas in objects
+    .replace(/,(\s*})/g, '$1')
+    // Fix double commas
+    .replace(/,,/g, ',')
+    // Remove comments
+    .replace(/\/\/.*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+
+  try {
+    return JSON.parse(fixed);
+  } catch (e: any) {
+    console.log('🔧 Attempting aggressive JSON repair...');
+
+    // Try to extract just the micro_goals array if possible
+    const microGoalsMatch = fixed.match(/"micro_goals"\s*:\s*\[([\s\S]*?)\]/);
+    if (microGoalsMatch) {
+      try {
+        const microGoalsArray = JSON.parse(`[${microGoalsMatch[1]}]`);
+        console.log('✅ Extracted micro-goals from broken JSON');
+
+        return {
+          weekly_hours: 5,
+          total_estimated_hours: 120,
+          micro_goals: microGoalsArray,
+          phases: [
+            { name: 'Build Foundation', duration_weeks: 4, focus: 'Establish base' },
+            { name: 'Develop Skills', duration_weeks: 6, focus: 'Progress capability' },
+            { name: 'Peak Performance', duration_weeks: 4, focus: 'Achieve goal' },
+          ],
+          description: 'Progressive training plan to achieve your goal.',
+        };
+      } catch {
+        console.log('❌ Could not extract micro-goals');
+      }
+    }
+
+    throw new Error(`JSON parse failed: ${e.message}`);
+  }
+}
+
+/**
+ * POST /api/goals/from-dreams
+ * Extract goals from free-form text
+ */
+router.post('/from-dreams', async (req: Request, res: Response) => {
+  try {
+    const { user_id, text } = req.body;
+
+    if (!user_id || !text) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'text'],
+      });
+    }
+
+    console.log(`🎯 Extracting goals from dreams for user ${user_id}`);
+
+    const prompt = `Extract goals from this text and return as JSON array.
+
+Text: "${text}"
+
+Return JSON in this exact format:
+{
+  "goals": [
+    {
+      "name": "Goal name",
+      "category": "fitness|money|skill|social|travel|habit|business|experience",
+      "description": "Brief description",
+      "target_date": "YYYY-MM-DD or null",
+      "priority": "high|medium|low"
+    }
+  ]
+}
+
+Only return valid JSON, no other text.`;
+
+    const response = await simpleCompletion(prompt);
+
+    let cleanResponse = response.trim();
+    if (cleanResponse.startsWith('```json')) {
+      cleanResponse = cleanResponse
+        .replace(/```json\n?/g, '')
+        .replace(/```\n?/g, '');
+    }
+
+    const parsed = JSON.parse(cleanResponse);
+    const goals = parsed.goals || [];
+
+    console.log(`✅ Extracted ${goals.length} goals`);
+
+    return res.json({
+      goals,
+      message: `Found ${goals.length} goals. Review and confirm to save.`,
+    });
+  } catch (error: any) {
+    console.error('❌ Goal extraction error:', error);
+    return res.status(500).json({
+      error: 'Failed to extract goals',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/goals/conversation
+ * Conversational goal creation:
+ * - Phase "collecting": gather goal + current_level + timeline + category
+ * - Phase "review": show full plan, let user tweak hours/deadline/milestones
+ * - Only returns complete: true when user explicitly accepts the plan
+ */
+router.post('/conversation', async (req: Request, res: Response) => {
+  try {
+    const { user_id, message, conversation_state } = req.body;
+
+    if (!user_id || !message) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'message'],
+      });
+    }
+
+    console.log(`💬 Goal conversation message: "${message}"`);
+
+    // Build conversation history
+    const history = conversation_state?.history || [];
+    history.push({ role: 'user', content: message });
+
+    const phase: 'collecting' | 'review' | 'done' =
+      conversation_state?.phase || 'collecting';
+
+    //
+
+##### backend/src/routes/goals.ts #####
+import { Router, Request, Response } from 'express';
+import { supabase } from '../services/supabase';
+import { openai, simpleCompletion, generateWeeklyTrainingPlan } from '../services/openai';
+
+const router = Router();
+
+/**
+ * Robust JSON fixer - handles common AI JSON errors
+ * Used by /:goalId/generate-plan
+ */
+function fixAndParseJSON(jsonString: string): any {
+  let fixed = jsonString.trim();
+
+  // Remove markdown fences
+  fixed = fixed
+    .replace(/```json\n?/g, '')
+    .replace(/```\n?/g, '')
+    .replace(/```/g, '');
+
+  // Extract JSON object
+  const firstBrace = fixed.indexOf('{');
+  const lastBrace = fixed.lastIndexOf('}');
+  if (firstBrace > 0) fixed = fixed.substring(firstBrace);
+  if (lastBrace > 0) fixed = fixed.substring(0, lastBrace + 1);
+
+  // Fix common JSON errors
+  fixed = fixed
+    // Remove trailing commas in arrays
+    .replace(/,(\s*])/g, '$1')
+    // Remove trailing commas in objects
+    .replace(/,(\s*})/g, '$1')
+    // Fix double commas
+    .replace(/,,/g, ',')
+    // Remove comments
+    .replace(/\/\/.*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+
+  try {
+    return JSON.parse(fixed);
+  } catch (e: any) {
+    console.log('🔧 Attempting aggressive JSON repair...');
+
+    // Try to extract just the micro_goals array if possible
+    const microGoalsMatch = fixed.match(/"micro_goals"\s*:\s*\[([\s\S]*?)\]/);
+    if (microGoalsMatch) {
+      try {
+        const microGoalsArray = JSON.parse(`[${microGoalsMatch[1]}]`);
+        console.log('✅ Extracted micro-goals from broken JSON');
+
+        return {
+          weekly_hours: 5,
+          total_estimated_hours: 120,
+          micro_goals: microGoalsArray,
+          phases: [
+            { name: 'Build Foundation', duration_weeks: 4, focus: 'Establish base' },
+            { name: 'Develop Skills', duration_weeks: 6, focus: 'Progress capability' },
+            { name: 'Peak Performance', duration_weeks: 4, focus: 'Achieve goal' },
+          ],
+          description: 'Progressive training plan to achieve your goal.',
+        };
+      } catch {
+        console.log('❌ Could not extract micro-goals');
+      }
+    }
+
+    throw new Error(`JSON parse failed: ${e.message}`);
+  }
+}
+
+/**
+ * POST /api/goals/from-dreams
+ * Extract goals from free-form text
+ */
+router.post('/from-dreams', async (req: Request, res: Response) => {
+  try {
+    const { user_id, text } = req.body;
+
+    if (!user_id || !text) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'text'],
+      });
+    }
+
+    console.log(`🎯 Extracting goals from dreams for user ${user_id}`);
+
+    const prompt = `Extract goals from this text and return as JSON array.
+
+Text: "${text}"
+
+Return JSON in this exact format:
+{
+  "goals": [
+    {
+      "name": "Goal name",
+      "category": "fitness|money|skill|social|travel|habit|business|experience",
+      "description": "Brief description",
+      "target_date": "YYYY-MM-DD or null",
+      "priority": "high|medium|low"
+    }
+  ]
+}
+
+Only return valid JSON, no other text.`;
+
+    const response = await simpleCompletion(prompt);
+
+    let cleanResponse = response.trim();
+    if (cleanResponse.startsWith('```json')) {
+      cleanResponse = cleanResponse
+        .replace(/```json\n?/g, '')
+        .replace(/```\n?/g, '');
+    }
+
+    const parsed = JSON.parse(cleanResponse);
+    const goals = parsed.goals || [];
+
+    console.log(`✅ Extracted ${goals.length} goals`);
+
+    return res.json({
+      goals,
+      message: `Found ${goals.length} goals. Review and confirm to save.`,
+    });
+  } catch (error: any) {
+    console.error('❌ Goal extraction error:', error);
+    return res.status(500).json({
+      error: 'Failed to extract goals',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/goals/conversation
+ * Conversational goal creation:
+ * - Phase "collecting": gather goal + current_level + timeline + category
+ * - Phase "review": show full plan, let user tweak hours/deadline/milestones
+ * - Only returns complete: true when user explicitly accepts the plan
+ */
+router.post('/conversation', async (req: Request, res: Response) => {
+  try {
+    const { user_id, message, conversation_state } = req.body;
+
+    if (!user_id || !message) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'message'],
+      });
+    }
+
+    console.log(`💬 Goal conversation message: "${message}"`);
+
+    // Build conversation history
+    const history = conversation_state?.history || [];
+    history.push({ role: 'user', content: message });
+
+    const phase: 'collecting' | 'review' | 'done' =
+      conversation_state?.phase || 'collecting';
+
+    //
+
+##### backend/src/routes/memory.ts #####
+import { Router, Request, Response } from 'express';
+import { 
+  summarizeWeek, 
+  getRecentMemories, 
+  storeMemory,
+  getRelevantMemories 
+} from '../services/memory';
+
+const router = Router();
+
+/**
+ * POST /api/memory/summarize-week
+ * Manually trigger weekly summary generation (for testing or admin)
+ */
+router.post('/summarize-week', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({
+        error: 'Missing user_id'
+      });
+    }
+
+    console.log(`📊 Manually triggering weekly summary for ${user_id}`);
+
+    await summarizeWeek(user_id);
+
+    return res.json({
+      message: 'Weekly summary generated successfully',
+      user_id
+    });
+
+  } catch (error: any) {
+    console.error('❌ Weekly summary error:', error);
+    return res.status(500).json({
+      error: 'Failed to generate weekly summary',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/memory/recent
+ * Get recent memories for a user (for debugging/admin)
+ */
+router.get('/recent', async (req: Request, res: Response) => {
+  try {
+    const { user_id, limit } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({
+        error: 'Missing user_id query parameter'
+      });
+    }
+
+    const memories = await getRecentMemories(
+      user_id as string,
+      parseInt(limit as string) || 20
+    );
+
+    return res.json({
+      memories,
+      count: memories.length
+    });
+
+  } catch (error: any) {
+    console.error('❌ Get memories error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch memories',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/memory/search
+ * Search memories by query (for testing similarity search)
+ */
+router.post('/search', async (req: Request, res: Response) => {
+  try {
+    const { user_id, query, limit } = req.body;
+
+    if (!user_id || !query) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'query']
+      });
+    }
+
+    const memories = await getRelevantMemories(
+      user_id,
+      query,
+      limit || 5
+    );
+
+    return res.json({
+      query,
+      memories,
+      count: memories.length
+    });
+
+  } catch (error: any) {
+    console.error('❌ Memory search error:', error);
+    return res.status(500).json({
+      error: 'Failed to search memories',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/memory/store
+ * Manually store a memory (for testing or admin)
+ */
+router.post('/store', async (req: Request, res: Response) => {
+  try {
+    const { user_id, content, metadata } = req.body;
+
+    if (!user_id || !content) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'content']
+      });
+    }
+
+    await storeMemory({
+      user_id,
+      content,
+      metadata: metadata || {}
+    });
+
+    return res.json({
+      message: 'Memory stored successfully'
+    });
+
+  } catch (error: any) {
+    console.error('❌ Store memory error:', error);
+    return res.status(500).json({
+      error: 'Failed to store memory',
+      message: error.message
+    });
+  }
+});
+
+export default router;
+##### backend/src/routes/schedule.ts #####
+import { Router, Request, Response } from 'express';
+import { supabase } from '../services/supabase';
+import { parseRelativeTime, parseTime, combineDateAndTime } from '../utils/timeParser';
+import { rescheduleBlock } from '../services/planner';
+
+const router = Router();
+
+/**
+ * GET /api/schedule
+ * Get schedule blocks for a date range
+ */
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const { user_id, start_date, end_date } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({
+        error: 'Missing user_id query parameter'
+      });
+    }
+
+    let query = supabase
+      .from('schedule_blocks')
+      .select(`
+        *,
+        goals (name, category)
+      `)
+      .eq('user_id', user_id as string);
+
+    if (start_date) {
+      query = query.gte('scheduled_start', start_date as string);
+    }
+
+    if (end_date) {
+      query = query.lte('scheduled_start', end_date as string);
+    }
+
+    const { data: blocks, error } = await query.order('scheduled_start', { ascending: true });
+
+    if (error) throw error;
+
+    return res.json({
+      blocks: blocks || [],
+      count: blocks?.length || 0
+    });
+
+  } catch (error: any) {
+    console.error('❌ Schedule fetch error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch schedule',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/schedule/today
+ * Get today's schedule
+ */
+router.get('/today', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({
+        error: 'Missing user_id query parameter'
+      });
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data: blocks, error } = await supabase
+      .from('schedule_blocks')
+      .select(`
+        *,
+        goals (name, category)
+      `)
+      .eq('user_id', user_id as string)
+      .gte('scheduled_start', `${today}T00:00:00`)
+      .lt('scheduled_start', `${today}T23:59:59`)
+      .order('scheduled_start', { ascending: true });
+
+    if (error) throw error;
+
+    return res.json({
+      date: today,
+      blocks: blocks || [],
+      count: blocks?.length || 0
+    });
+
+  } catch (error: any) {
+    console.error('❌ Today schedule error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch today\'s schedule',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/schedule
+ * Create a new schedule block
+ */
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const {
+      user_id,
+      goal_id,
+      type,
+      scheduled_start,
+      duration_mins,
+      notes
+    } = req.body;
+
+    if (!user_id || !type || !scheduled_start || !duration_mins) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'type', 'scheduled_start', 'duration_mins']
+      });
+    }
+
+    const { data: block, error } = await supabase
+      .from('schedule_blocks')
+      .insert({
+        user_id,
+        goal_id: goal_id || null,
+        type,
+        scheduled_start,
+        duration_mins,
+        notes: notes || null,
+        flexibility: 'movable',
+        created_by: 'user',
+        status: 'scheduled'
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`✅ Created schedule block: ${type} at ${scheduled_start}`);
+
+    return res.json({
+      block,
+      message: 'Schedule block created'
+    });
+
+  } catch (error: any) {
+    console.error('❌ Schedule creation error:', error);
+    return res.status(500).json({
+      error: 'Failed to create schedule block',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/schedule/auto-generate
+ * Auto-generate weekly schedule based on goals and availability
+ */
+router.post('/auto-generate', async (req: Request, res: Response) => {
+
+--- backend/src/services (first 160 lines of each) ---
+
+##### backend/src/services/contextBuilder.ts #####
+import { supabase } from './supabase';
+
+/**
+ * Build context for AI from user's data
+ * This gives Pepzi awareness of the user's goals, schedule, and recent activity
+ */
+export async function buildUserContext(userId: string) {
+  try {
+    // Get user info
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    // Get active goals
+    const { data: goals } = await supabase
+      .from('goals')
+      .select(`
+        *,
+        micro_goals (*)
+      `)
+      .eq('user_id', userId)
+      .eq('status', 'active');
+
+    // Get today's schedule
+    const today = new Date().toISOString().split('T')[0];
+    const { data: todaySchedule } = await supabase
+      .from('schedule_blocks')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('scheduled_start', `${today}T00:00:00`)
+      .lt('scheduled_start', `${today}T23:59:59`)
+      .order('scheduled_start', { ascending: true });
+
+    // Get recent logs (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const { data: recentLogs } = await supabase
+      .from('log_entries')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('timestamp', sevenDaysAgo.toISOString())
+      .order('timestamp', { ascending: false })
+      .limit(20);
+
+    // Get recent messages (last 10)
+    const { data: recentMessages } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('user_id', userId)
+      .order('timestamp', { ascending: false })
+      .limit(10);
+
+    return {
+      user,
+      goals: goals || [],
+      todaySchedule: todaySchedule || [],
+      recentLogs: recentLogs || [],
+      recentMessages: (recentMessages || []).reverse(), // Oldest first for conversation flow
+      currentDate: new Date().toISOString(),
+      currentTime: new Date().toTimeString().split(' ')[0]
+    };
+  } catch (error) {
+    console.error('Error building context:', error);
+    throw error;
+  }
+}
+
+/**
+ * Format context for display/logging
+ */
+export function formatContextSummary(context: any): string {
+  return `
+User: ${context.user?.name || 'Unknown'}
+Active Goals: ${context.goals?.length || 0}
+Today's Schedule: ${context.todaySchedule?.length || 0} blocks
+Recent Logs: ${context.recentLogs?.length || 0}
+`.trim();
+}
+
+##### backend/src/services/logger.ts #####
+import { supabase } from './supabase';
+
+/**
+ * Log an activity
+ */
+export async function createLog(
+  userId: string,
+  goalId: string | null,
+  type: string,
+  data: any,
+  source: string = 'user_message'
+) {
+  try {
+    const { data: log, error } = await supabase
+      .from('log_entries')
+      .insert({
+        user_id: userId,
+        goal_id: goalId,
+        timestamp: new Date().toISOString(),
+        type,
+        data,
+        source
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`📝 Logged ${type}:`, data);
+
+    // Check if this log completes any micro-goals
+    if (goalId) {
+      await checkMicroGoalCompletion(goalId, data);
+    }
+
+    return log;
+  } catch (error) {
+    console.error('Error creating log:', error);
+    throw error;
+  }
+}
+
+/**
+ * Check if a log entry completes any micro-goals
+ */
+async function checkMicroGoalCompletion(goalId: string, logData: any) {
+  try {
+    // Get incomplete micro-goals for this goal
+    const { data: microGoals, error } = await supabase
+      .from('micro_goals')
+      .select('*')
+      .eq('goal_id', goalId)
+      .eq('completed', false)
+      .order('order_index', { ascending: true });
+
+    if (error) throw error;
+    if (!microGoals || microGoals.length === 0) return;
+
+    // Check each micro-goal's completion criteria
+    for (const microGoal of microGoals) {
+      const criteria = microGoal.completion_criteria;
+      let isComplete = false;
+
+      // Check different types of criteria
+      if (criteria.type === 'performance') {
+        // Example: run 5k under 24:00
+        if (criteria.metric && logData[criteria.metric]) {
+          const value = logData[criteria.metric];
+          const threshold = criteria.threshold;
+          
+          if (criteria.operator === 'less_than' && value < threshold) {
+            isComplete = true;
+          } else if (criteria.operator === 'greater_than' && value > threshold) {
+            isComplete = true;
+          } else if (criteria.operator === 'equals' && value === threshold) {
+            isComplete = true;
+          }
+        }
+      }
+
+      if (isComplete) {
+        // Mark micro-goal as complete
+        await supabase
+          .from('micro_goals')
+          .update({
+            completed: true,
+            completed_at: new Date().toISOString(),
+            completion_data: logData
+          })
+          .eq('id', microGoal.id);
+
+        console.log(`🎉 Micro-goal completed: ${microGoal.name}`);
+
+        // Update goal progress
+        await updateGoalProgress(goalId);
+      }
+    }
+  } catch (error) {
+    console.error('Error checking micro-goal completion:', error);
+  }
+}
+
+/**
+ * Update goal progress based on completed micro-goals
+ */
+async function updateGoalProgress(goalId: string) {
+  try {
+    // Get all micro-goals for this goal
+    const { data: microGoals, error } = await supabase
+      .from('micro_goals')
+      .select('*')
+      .eq('goal_id', goalId);
+
+    if (error) throw error;
+    if (!microGoals || microGoals.length === 0) return;
+
+    const totalMicroGoals = microGoals.length;
+    const completedMicroGoals = microGoals.filter(mg => mg.completed).length;
+    const percentComplete = Math.round((completedMicroGoals / totalMicroGoals) * 100);
+
+    // Update goal progress
+    await supabase
+      .from('goals')
+      .update({
+        progress: {
+          percent_complete: percentComplete,
+          completed_micro_goals: completedMicroGoals,
+          total_micro_goals: totalMicroGoals,
+          updated_at: new Date().toISOString()
+        }
+      })
+      .eq('id', goalId);
+
+    console.log(`📊 Goal progress updated: ${percentComplete}%`);
+  } catch (error) {
+    console.error('Error updating goal progress:', error);
+  }
+}
+
+/**
+ * Get recent logs for a user
+ */
+export async function getRecentLogs(userId: string, days: number = 7) {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+
+    const { data: logs, error } = await supabase
+      .from('log_entries')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('timestamp', cutoffDate.toISOString())
+      .order('timestamp', { ascending: false });
+
+    if (error) throw error;
+
+    return logs || [];
+  } catch (error) {
+    console.error('Error fetching logs:', error);
+    return [];
+
+##### backend/src/services/memory.ts #####
+import { supabase } from './supabase';
+import { createEmbedding, simpleCompletion } from './openai';
+import { format, subDays } from 'date-fns';
+
+/**
+ * Memory Service - Pepzi's long-term memory system
+ * 
+ * This service enables Pepzi to:
+ * - Remember behavioral patterns
+ * - Recall past conversations and decisions
+ * - Personalize coaching based on history
+ * - Adapt plans based on what actually works for the user
+ */
+
+export interface Memory {
+  id?: string;
+  user_id: string;
+  content: string;
+  embedding?: number[];
+  metadata?: {
+    type?: 'behavioral_pattern' | 'decision' | 'achievement' | 'struggle' | 'preference';
+    goal_id?: string;
+    confidence?: number;
+    date_range?: string;
+  };
+  created_at?: string;
+}
+
+/**
+ * Store a memory with vector embedding
+ * Use this to save important facts about the user that Pepzi should remember
+ */
+export async function storeMemory(memory: Memory): Promise<void> {
+  try {
+    console.log(`💾 Storing memory: "${memory.content.substring(0, 50)}..."`);
+
+    // Create embedding for the memory content
+    const embedding = await createEmbedding(memory.content);
+
+    // Insert into database
+    const { error } = await supabase
+      .from('memory_vectors')
+      .insert({
+        user_id: memory.user_id,
+        content: memory.content,
+        embedding,
+        metadata: memory.metadata || {}
+      });
+
+    if (error) throw error;
+
+    console.log(`✅ Memory stored successfully`);
+  } catch (error) {
+    console.error('Error storing memory:', error);
+    throw error;
+  }
+}
+
+/**
+ * Retrieve relevant memories for a given context
+ * Uses vector similarity search to find the most relevant past memories
+ */
+export async function getRelevantMemories(
+  userId: string,
+  queryText: string,
+  limit: number = 5
+): Promise<Array<{ content: string; metadata: any; similarity: number }>> {
+  try {
+    console.log(`🔍 Searching memories for: "${queryText.substring(0, 50)}..."`);
+
+    // Create embedding for the query
+    const queryEmbedding = await createEmbedding(queryText);
+
+    // Use Supabase RPC function for vector similarity search
+    const { data, error } = await supabase.rpc('match_memories', {
+      user_id_input: userId,
+      query_embedding: queryEmbedding,
+      match_count: limit
+    });
+
+    if (error) throw error;
+
+    console.log(`📚 Found ${data?.length || 0} relevant memories`);
+    
+    return data || [];
+  } catch (error) {
+    console.error('Error retrieving memories:', error);
+    // Return empty array on error - memory is optional
+    return [];
+  }
+}
+
+/**
+ * Generate weekly summary and store as memories
+ * This runs periodically (e.g., every Sunday night) to analyze the week
+ */
+export async function summarizeWeek(userId: string): Promise<void> {
+  try {
+    console.log(`📊 Generating weekly summary for user ${userId}`);
+
+    // Get data from the last 7 days
+    const weekAgo = subDays(new Date(), 7);
+    const weekAgoISO = weekAgo.toISOString();
+
+    // Fetch logs from the past week
+    const { data: logs, error: logsError } = await supabase
+      .from('log_entries')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('timestamp', weekAgoISO)
+      .order('timestamp', { ascending: true });
+
+    if (logsError) throw logsError;
+
+    // Fetch schedule blocks from the past week
+    const { data: blocks, error: blocksError } = await supabase
+      .from('schedule_blocks')
+      .select('*, goals(name, category)')
+      .eq('user_id', userId)
+      .gte('scheduled_start', weekAgoISO)
+      .order('scheduled_start', { ascending: true });
+
+    if (blocksError) throw blocksError;
+
+    // Fetch messages from the past week
+    const { data: messages, error: messagesError } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('timestamp', weekAgoISO)
+      .order('timestamp', { ascending: true });
+
+    if (messagesError) throw messagesError;
+
+    // If no activity this week, skip summary
+    if (!logs?.length && !blocks?.length && !messages?.length) {
+      console.log('⏭️  No activity this week, skipping summary');
+      return;
+    }
+
+    // Calculate basic stats
+    const scheduledCount = blocks?.length || 0;
+    const completedCount = blocks?.filter(b => b.status === 'completed').length || 0;
+    const completionRate = scheduledCount > 0 ? Math.round((completedCount / scheduledCount) * 100) : 0;
+
+    // Group logs by type
+    const logsByType = (logs || []).reduce((acc, log) => {
+      acc[log.type] = (acc[log.type] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    // Prepare context for LLM
+    const weekContext = `
+WEEK OF ${format(weekAgo, 'MMM dd, yyyy')} - ${format(new Date(), 'MMM dd, yyyy')}
+
+SCHEDULE ADHERENCE:
+- Scheduled blocks: ${scheduledCount}
+- Completed: ${completedCount}
+- Completion rate: ${completionRate}%
+
+
+##### backend/src/services/openai.ts #####
+import OpenAI from 'openai';
+
+// Initialize OpenAI client
+const apiKey = process.env.OPENAI_API_KEY;
+
+if (!apiKey) {
+  throw new Error('Missing OPENAI_API_KEY in .env file');
+}
+
+export const openai = new OpenAI({ apiKey });
+
+/**
+ * Extract structured intents from user message
+ * This is the core of Pepzi's natural language understanding
+ * NOW WITH MEMORY INTEGRATION! 🧠
+ */
+export async function extractIntents(
+  userMessage: string,
+  context: any
+): Promise<any> {
+  try {
+    // Build system prompt with memory context
+    let systemPrompt = `You are Pepzi, an AI life operating system assistant.
+
+Your job is to understand natural language requests and extract structured intents.
+
+Available intent types:
+- log_activity: User is logging something they did
+- reschedule_block: User wants to move a scheduled activity
+- create_block: User wants to add a new activity
+- query_progress: User is asking about their progress
+- general_chat: General conversation
+
+Current context:
+- Today: ${new Date().toISOString().split('T')[0]}
+- User goals: ${JSON.stringify(context.goals || [])}
+- Today's schedule: ${JSON.stringify(context.todaySchedule || [])}`;
+
+    // 🧠 ADD MEMORY CONTEXT IF AVAILABLE
+    if (context.memories && context.memories.trim().length > 0) {
+      systemPrompt += `
+
+IMPORTANT - KNOWN PATTERNS ABOUT THIS USER:
+${context.memories}
+
+You MUST use these patterns when giving advice. For example, if the user asks when to schedule something and you know they prefer mornings, recommend mornings and mention why (based on their past behavior).`;
+    }
+
+    systemPrompt += `
+
+Extract intents from the user's message and respond with JSON only.
+
+Format:
+{
+  "intents": [
+    {
+      "type": "intent_type",
+      "data": { ... relevant data ... }
+    }
+  ],
+  "response": "Natural language response to user"
+}`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: systemPrompt
+        },
+        {
+          role: 'user',
+          content: userMessage
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 1000
+    });
+
+    const content = response.choices[0]?.message?.content || '{}';
+    
+    // Try to parse JSON, stripping markdown if present
+    let cleanContent = content.trim();
+    if (cleanContent.startsWith('```json')) {
+      cleanContent = cleanContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+    }
+    
+    return JSON.parse(cleanContent);
+  } catch (error) {
+    console.error('OpenAI API error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate text embeddings for semantic memory
+ */
+export async function createEmbedding(text: string): Promise<number[]> {
+  try {
+    const response = await openai.embeddings.create({
+      model: 'text-embedding-3-small',
+      input: text
+    });
+    
+    return response.data[0].embedding;
+  } catch (error) {
+    console.error('Embedding creation error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Simple chat completion (for general responses)
+ */
+export async function simpleCompletion(
+  message: string,
+  systemPrompt?: string
+): Promise<string> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
+        { role: 'user' as const, content: message }
+      ],
+      temperature: 0.7,
+      max_tokens: 500
+    });
+    
+    return response.choices[0]?.message?.content || 'No response generated.';
+  } catch (error) {
+    console.error('Simple completion error:', error);
+    throw error;
+  }
+}
+
+/**
+ * JSON-only completion: forces the model to return valid JSON
+ */
+export async function jsonCompletion<T = any>(
+  prompt: string,
+  systemPrompt?: string
+): Promise<T> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            systemPrompt ??
+            'You are a helper that MUST respond with a single valid JSON object and nothing else.',
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      temperature: 0.4,
+
+##### backend/src/services/planner.ts #####
+import { supabase } from './supabase';
+import { addDays, startOfDay, setHours } from 'date-fns';
+
+/**
+ * Generate weekly schedule for a user
+ */
+export async function generateWeeklySchedule(userId: string) {
+  try {
+    console.log(`📅 Generating weekly schedule for user ${userId}`);
+
+    const { data: goals, error } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active');
+
+    if (error) throw error;
+    if (!goals || goals.length === 0) {
+      return { message: 'No active goals found' };
+    }
+
+    const totalHoursNeeded = goals.reduce((sum, goal) => {
+      return sum + (goal.plan?.weekly_hours || 0);
+    }, 0);
+
+    console.log(`⏰ Total weekly hours needed: ${totalHoursNeeded}`);
+
+    const blocks: any[] = [];
+    const today = startOfDay(new Date());
+
+    for (const goal of goals) {
+      const weeklyHours = goal.plan?.weekly_hours || 0;
+      if (weeklyHours === 0) continue;
+
+      const sessionsPerWeek = Math.ceil(weeklyHours / 1.5);
+      const hoursPerSession = weeklyHours / sessionsPerWeek;
+
+      for (let i = 0; i < sessionsPerWeek && i < 7; i++) {
+        const day = addDays(today, i);
+        const startTime = setHours(day, 9 + (i * 2) % 12);
+
+        blocks.push({
+          user_id: userId,
+          goal_id: goal.id,
+          type: getBlockType(goal.category),
+          scheduled_start: startTime.toISOString(),
+          duration_mins: Math.round(hoursPerSession * 60),
+          flexibility: 'movable',
+          created_by: 'ai',
+          status: 'scheduled'
+        });
+      }
+    }
+
+    const { data: savedBlocks, error: saveError } = await supabase
+      .from('schedule_blocks')
+      .insert(blocks)
+      .select();
+
+    if (saveError) throw saveError;
+
+    console.log(`✅ Created ${savedBlocks?.length || 0} schedule blocks`);
+
+    return {
+      blocks: savedBlocks,
+      total_hours: totalHoursNeeded,
+      message: `Generated ${savedBlocks?.length} schedule blocks for the week`
+    };
+
+  } catch (error) {
+    console.error('Error generating schedule:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get block type based on goal category
+ */
+function getBlockType(category: string): string {
+  const typeMap: { [key: string]: string } = {
+    'fitness': 'workout',
+    'money': 'deep_work',
+    'skill': 'practice',
+    'social': 'social',
+    'travel': 'planning',
+    'habit': 'routine',
+    'experience': 'event'
+  };
+  return typeMap[category] || 'activity';
+}
+
+/**
+ * Reschedule a block
+ */
+export async function rescheduleBlock(
+  blockId: string,
+  newStartTime: Date
+) {
+  try {
+    const { data: block, error } = await supabase
+      .from('schedule_blocks')
+      .update({
+        scheduled_start: newStartTime.toISOString(),
+        status: 'rescheduled'
+      })
+      .eq('id', blockId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`🔄 Rescheduled block to ${newStartTime.toISOString()}`);
+
+    return block;
+  } catch (error) {
+    console.error('Error rescheduling block:', error);
+    throw error;
+  }
+}
+
+##### backend/src/services/supabase.ts #####
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+
+// Load .env file FIRST before reading any environment variables
+dotenv.config();
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+
+console.log('🔍 Loading Supabase credentials...');
+console.log('   URL:', supabaseUrl ? '✅ Present' : '❌ Missing');
+console.log('   Service Key:', supabaseServiceKey ? '✅ Present' : '❌ Missing');
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error('Missing Supabase credentials in .env file');
+}
+
+export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  }
+});
+
+export async function testConnection(): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('users').select('count').limit(1);
+    if (error) {
+      console.error('❌ Supabase connection failed:', error.message);
+      return false;
+    }
+    console.log('✅ Supabase connected');
+    return true;
+  } catch (err) {
+    console.error('❌ Supabase error:', err);
+    return false;
+  }
+}
+
+
+
+=== FRONTEND: package.json ===
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.10",
+    "axios": "^1.13.2",
+    "date-fns": "^4.1.0",
+    "framer-motion": "^12.23.24",
+    "lucide-react": "^0.554.0",
+    "next": "16.0.3",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+
+--- frontend/tsconfig.json ---
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}
+
+--- frontend/next.config.* ---
+
+##### frontend/next.config.mjs #####
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://localhost:8080/api/:path*',
+      },
+    ];
+  },
+};
+
+export default nextConfig;
+
+##### frontend/next.config.ts #####
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
+
+--- frontend/tailwind/postcss configs ---
+
+##### frontend/postcss.config.mjs #####
+const config = {
+  plugins: {
+    "@tailwindcss/postcss": {},
+  },
+};
+
+export default config;
+
+--- frontend app entry files ---
+
+##### frontend/app/page.tsx #####
+import Link from 'next/link';
+import { MessageSquare, Target, Calendar, Sparkles, TrendingUp, Zap } from 'lucide-react';
+
+export default function HomePage() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50">
+      {/* Hero Section */}
+      <div className="max-w-6xl mx-auto px-6 py-20">
+        <div className="text-center mb-16">
+          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full mb-6 animate-pulse">
+            <Sparkles className="w-10 h-10 text-white" />
+          </div>
+          <h1 className="text-6xl font-bold text-gray-900 mb-6">
+            Welcome to <span className="bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">Pepzi</span>
+          </h1>
+          <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
+            Your AI-powered life operating system. Talk naturally, set goals, track progress, and achieve your dreams.
+          </p>
+          <Link
+            href="/today"
+            className="inline-flex items-center gap-3 px-8 py-4 bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-full font-semibold text-lg hover:shadow-2xl transition-all transform hover:scale-105"
+          >
+            <MessageSquare className="w-6 h-6" />
+            Get Started
+          </Link>
+        </div>
+
+        {/* Features Grid */}
+        <div className="grid md:grid-cols-3 gap-8 mt-20">
+          <Link href="/today" className="group">
+            <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100 hover:shadow-2xl transition-all transform hover:-translate-y-2">
+              <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <MessageSquare className="w-7 h-7 text-white" />
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-3">Natural Chat</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Talk to Pepzi like a friend. "I ran 5km today" or "Book gym time next Tuesday at 6pm"
+              </p>
+            </div>
+          </Link>
+
+          <Link href="/goals" className="group">
+            <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100 hover:shadow-2xl transition-all transform hover:-translate-y-2">
+              <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <Target className="w-7 h-7 text-white" />
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-3">Smart Goals</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Extract goals from your dreams, track micro-milestones, and visualize progress
+              </p>
+            </div>
+          </Link>
+
+          <Link href="/schedule" className="group">
+            <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100 hover:shadow-2xl transition-all transform hover:-translate-y-2">
+              <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <Calendar className="w-7 h-7 text-white" />
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-3">Auto Schedule</h3>
+              <p className="text-gray-600 leading-relaxed">
+                AI generates your schedule based on goals. Move blocks with natural language
+              </p>
+            </div>
+          </Link>
+        </div>
+
+        {/* Stats */}
+        <div className="grid md:grid-cols-3 gap-8 mt-20 text-center">
+          <div>
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <TrendingUp className="w-6 h-6 text-purple-500" />
+              <div className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                100%
+              </div>
+            </div>
+            <p className="text-gray-600">Natural Language</p>
+          </div>
+          <div>
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <Zap className="w-6 h-6 text-blue-500" />
+              <div className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                AI-Powered
+              </div>
+            </div>
+            <p className="text-gray-600">OpenAI GPT-4</p>
+          </div>
+          <div>
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <Sparkles className="w-6 h-6 text-indigo-500" />
+              <div className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                Real-time
+              </div>
+            </div>
+            <p className="text-gray-600">Progress Tracking</p>
+          </div>
+        </div>
+
+        {/* CTA */}
+        <div className="mt-20 text-center">
+          <p className="text-gray-600 mb-4">Ready to transform your life?</p>
+          <Link
+            href="/today"
+            className="inline-flex items-center gap-2 text-purple-600 font-semibold hover:text-purple-700 transition-colors"
+          >
+            Start now <span className="text-2xl">→</span>
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+--- goal-related components ---
+
+##### frontend/components/goals/AddGoalModal.tsx #####
+'use client';
+
+import { useState } from 'react';
+import { X, Send } from 'lucide-react';
+import { goalsAPI } from '@/lib/api';
+
+interface Message {
+  role: 'assistant' | 'user';
+  content: string;
+  timestamp: Date;
+}
+
+interface AddGoalModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onGoalCreated: () => void;
+  userId: string;
+}
+
+export default function AddGoalModal({
+  isOpen,
+  onClose,
+  onGoalCreated,
+  userId,
+}: AddGoalModalProps) {
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: 'assistant',
+      content: `🎯 Tell me your goal!
+
+Include:
+- What you want to achieve
+- Your current level/experience
+- When you want to achieve it by
+
+Examples:
+
+"I want to run a sub-30 10K. Currently at 33 minutes with 3 years running experience. Target: 3 months."
+
+"I want to climb a 7000m mountain. No climbing experience. Target: 1 year from now."
+
+"I want to reach $500 MRR with a SaaS. Built 2 side projects before. Target: 6 months."`,
+      timestamp: new Date(),
+    },
+  ]);
+  const [input, setInput] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // 🔁 full conversation_state that backend returns
+  const [conversationState, setConversationState] = useState<any | null>(null);
+
+  if (!isOpen) return null;
+
+  const handleSend = async () => {
+    if (!input.trim() || isProcessing) return;
+
+    const userMessage: Message = {
+      role: 'user',
+      content: input,
+      timestamp: new Date(),
+    };
+
+    const currentInput = input;
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setIsProcessing(true);
+
+    try {
+      // 🔌 Call goal conversation endpoint via goalsAPI
+      const data = await goalsAPI.conversation(userId, currentInput, conversationState || undefined);
+
+      const assistantMessage: Message = {
+        role: 'assistant',
+        content: data.message,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, assistantMessage]);
+
+      if (data.state) {
+        setConversationState(data.state);
+      }
+
+      // ✅ If complete, create goal + plan
+      if (data.complete && data.goal && data.milestones) {
+        await createGoalAndPlan(
+          data.goal,
+          data.milestones,
+          data.tracking_criteria || [],
+          data.weekly_hours,
+          data.total_hours
+        );
+      }
+    } catch (error) {
+      console.error('Error processing message:', error);
+      const errorMessage: Message = {
+        role: 'assistant',
+        content: 'Sorry, I had trouble processing that. Can you try again?',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const createGoalAndPlan = async (
+    goalData: any,
+    milestones: { name: string; hours: number }[],
+    trackingCriteria: string[],
+    weeklyHours: number,
+    totalHours: number
+  ) => {
+    try {
+      // 1️⃣ Create the goal
+      const goal = await goalsAPI.createGoal({
+        user_id: userId,
+        name: goalData.name,
+        category: goalData.category,
+        target_date: goalData.target_date,
+        // optional: keep raw description/current_level
+        // description: goalData.description,
+      });
+
+      // 2️⃣ Attach training plan with milestones
+      await goalsAPI.createPlanWithMilestones(goal.id, {
+        milestones,
+        weekly_hours: weeklyHours,
+        total_hours: totalHours,
+        tracking_criteria: trackingCriteria,
+      });
+
+      const successMessage: Message = {
+        role: 'assistant',
+        content:
+          '🎉 Goal created with your custom training plan! I’ll close this and refresh your goals.',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, successMessage]);
+
+      setTimeout(() => {
+        onGoalCreated();
+        onClose();
+      }, 1500);
+    } catch (error) {
+      console.error('Error creating goal/plan:', error);
+      const errorMessage: Message = {
+        role: 'assistant',
+        content: 'I created part of your plan, but something went wrong saving it fully.',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-2xl font-bold text-gray-900">Add New Goal</h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Chat Messages */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {messages.map((msg, idx) => (
+            <div
+              key={idx}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                  msg.role === 'user'
+                    ? 'bg-gradient-to-br from-purple-500 to-blue-500 text-white'
+                    : 'bg-gray-100 text-gray-900'
+                }`}
+              >
+                <div className="flex items-start gap-2 mb-1">
+                  <span className="text-sm font-semibold">
+                    {msg.role === 'user' ? 'You' : '🤖 Pepzi'}
+                  </span>
+                  <span className="text-xs opacity-70">
+                    {msg.timestamp.toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </div>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                  {msg.content}
+                </p>
+              </div>
+            </div>
+          ))}
+          {isProcessing && (
+
+##### frontend/components/goals/GoalDetailView.tsx #####
+'use client';
+
+import { ArrowLeft, Target, Calendar, TrendingUp, Clock, CheckCircle2, Circle, MessageCircle, BookOpen } from 'lucide-react';
+import { useState } from 'react';
+import type { Goal } from '@/lib/api';
+
+interface GoalDetailViewProps {
+  goal: Goal;
+  onBack: () => void;
+}
+
+export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
+  const [expandedWeek, setExpandedWeek] = useState<number | null>(null);
+
+  const getCategoryColor = (category: string) => {
+    const colors: { [key: string]: string } = {
+      fitness: 'from-green-500 to-emerald-500',
+      money: 'from-yellow-500 to-orange-500',
+      skill: 'from-blue-500 to-indigo-500',
+      social: 'from-pink-500 to-rose-500',
+      travel: 'from-purple-500 to-violet-500',
+      habit: 'from-cyan-500 to-teal-500',
+      business: 'from-orange-500 to-red-500',
+      experience: 'from-indigo-500 to-purple-500',
+    };
+    return colors[category] || 'from-gray-500 to-slate-500';
+  };
+
+  const microGoals = goal.micro_goals || [];
+  const progressPercent = goal.progress?.percent_complete || 0;
+  const completedMicroGoals = goal.progress?.completed_micro_goals || 0;
+  const totalMicroGoals = goal.progress?.total_micro_goals || 0;
+  const trackingCriteria = goal.plan?.tracking_criteria || [];
+  const weeklyPlan = goal.plan?.weekly_plan;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50 p-8 pb-24 md:pb-8">
+      <div className="max-w-4xl mx-auto">
+        {/* Back Button */}
+        <button
+          onClick={onBack}
+          className="mb-6 flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+        >
+          <ArrowLeft className="w-5 h-5" />
+          Back to Goals
+        </button>
+
+        {/* Header */}
+        <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100 mb-6">
+          <div className="flex items-start gap-6">
+            <div className={`w-20 h-20 bg-gradient-to-br ${getCategoryColor(goal.category)} rounded-2xl flex items-center justify-center flex-shrink-0`}>
+              <Target className="w-10 h-10 text-white" />
+            </div>
+            <div className="flex-1">
+              <h1 className="text-4xl font-bold text-gray-900 mb-3">{goal.name}</h1>
+              <div className="flex items-center gap-4 flex-wrap">
+                <span className="px-4 py-2 bg-purple-100 text-purple-700 rounded-full font-medium">
+                  {goal.category}
+                </span>
+                {goal.target_date && (
+                  <span className="flex items-center gap-2 text-gray-600">
+                    <Calendar className="w-5 h-5" />
+                    Target: {new Date(goal.target_date).toLocaleDateString()}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress Overview */}
+        <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 mb-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">📊 Progress Overview</h2>
+          
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-gray-700">Overall Progress</span>
+              <span className="text-2xl font-bold text-purple-600">{progressPercent}%</span>
+            </div>
+            <div className="w-full h-4 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full bg-gradient-to-r ${getCategoryColor(goal.category)} transition-all duration-500`}
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="text-center p-4 bg-gray-50 rounded-xl">
+              <div className="text-3xl font-bold text-gray-900">{completedMicroGoals}/{totalMicroGoals}</div>
+              <div className="text-sm text-gray-600 mt-1">Milestones</div>
+            </div>
+            <div className="text-center p-4 bg-gray-50 rounded-xl">
+              <div className="text-3xl font-bold text-gray-900">{goal.plan?.weekly_hours || 0}h</div>
+              <div className="text-sm text-gray-600 mt-1">Per Week</div>
+            </div>
+            <div className="text-center p-4 bg-green-50 rounded-xl">
+              <div className="text-3xl font-bold text-green-600">✓</div>
+              <div className="text-sm text-gray-600 mt-1">On Track</div>
+            </div>
+            <div className="text-center p-4 bg-blue-50 rounded-xl">
+              <div className="text-3xl font-bold text-blue-600">{weeklyPlan?.weeks?.length || 0}</div>
+              <div className="text-sm text-gray-600 mt-1">Weeks</div>
+            </div>
+          </div>
+        </div>
+
+        {/* 📚 TRAINING CURRICULUM - NEW SECTION */}
+        {weeklyPlan && weeklyPlan.weeks && weeklyPlan.weeks.length > 0 && (
+          <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 mb-6">
+            <div className="flex items-center gap-3 mb-4">
+              <BookOpen className="w-6 h-6 text-purple-600" />
+              <h2 className="text-xl font-bold text-gray-900">📚 Training Curriculum</h2>
+            </div>
+
+            {weeklyPlan.summary && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <p className="text-sm text-blue-900">{weeklyPlan.summary}</p>
+              </div>
+            )}
+
+            {weeklyPlan.realism_notes && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                <p className="text-sm text-yellow-900">
+                  <strong>Note:</strong> {weeklyPlan.realism_notes}
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {weeklyPlan.weeks.map((week: any, index: number) => {
+                const isExpanded = expandedWeek === week.week_number;
+                const relatedMilestone = weeklyPlan.milestones?.find(
+                  (m: any) => m.target_week === week.week_number
+                );
+
+                return (
+                  <div
+                    key={week.week_number}
+                    className="border border-gray-200 rounded-lg overflow-hidden"
+                  >
+                    {/* Week Header */}
+                    <button
+                      onClick={() => setExpandedWeek(isExpanded ? null : week.week_number)}
+                      className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-gray-900">Week {week.week_number}</span>
+                        <span className="text-sm text-gray-600">• {week.focus}</span>
+                        {relatedMilestone && (
+                          <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">
+                            🎯 Milestone
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-500">
+                          {week.sessions_per_week} sessions
+                        </span>
+                        <span className="text-gray-400">
+                          {isExpanded ? '▼' : '▶'}
+                        </span>
+                      </div>
+                    </button>
+
+                    {/* Week Sessions */}
+                    {isExpanded && (
+                      <div className="p-4 space-y-3 bg-white">
+                        {relatedMilestone && (
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
+                            <div className="font-semibold text-green-900 mb-1">
+                              🎯 {relatedMilestone.name}
+                            </div>
+                            <div className="text-sm text-green-700">
+                              {relatedMilestone.criteria}
+                            </div>
+                          </div>
+                        )}
+
+                        {week.sessions && week.sessions.length > 0 ? (
+                          week.sessions.map((session: any, sessionIndex: number) => (
+                            <div
+                              key={sessionIndex}
+                              className="border border-gray-200 rounded-lg p-3"
+                            >
+                              <div className="flex items-start justify-between mb-2">
+                                <h4 className="font-semibold text-gray-900">
+                                  {session.name}
+                                </h4>
+                              </div>
+                              <p className="text-sm text-gray-700 mb-2">
+                                {session.description}
+                              </p>
+                              {session.notes && (
+                                <p className="text-xs text-gray-500 bg-gray-50 rounded px-2 py-1">
+                                  💡 {session.notes}
+                                </p>
+                              )}
+                            </div>
+                          ))
+
+
+=== NOTE ===
+This snapshot intentionally skips .env, node_modules, .next, etc. Double-check for secrets before sharing.
