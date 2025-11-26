@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { supabase } from '../services/supabase';
 import { openai, simpleCompletion } from '../services/openai';
+import axios from 'axios';
 
 const router = Router();
 
@@ -1275,6 +1276,7 @@ RESPOND WITH JSON:
 /**
  * POST /api/goals
  * Create a new goal
+ * 🆕 Now accepts preferred_days and preferred_time for scheduling
  */
 router.post('/', async (req: Request, res: Response) => {
   try {
@@ -1285,6 +1287,8 @@ router.post('/', async (req: Request, res: Response) => {
       target_date,
       description,
       success_condition,
+      preferred_days,
+      preferred_time,
     } = req.body;
 
     if (!user_id || !name || !category) {
@@ -1302,6 +1306,8 @@ router.post('/', async (req: Request, res: Response) => {
         category,
         target_date: target_date || null,
         status: 'active',
+        preferred_days: preferred_days || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+        preferred_time: preferred_time || 'any',
         plan: {
           description: description || '',
           success_condition: success_condition || '',
@@ -1464,6 +1470,43 @@ router.post(
       console.log(
         `✅ Created plan: ${baseWeekly}h/week, ${baseSessions} sessions, ${totalWeeks} weeks, ${safeMilestones.length} milestones`
       );
+
+      // 🆕 AUTO-GENERATE FULL SCHEDULE FOR THIS GOAL
+      // Fetch goal with updated plan for schedule generation
+      const { data: updatedGoal } = await supabase
+        .from('goals')
+        .select('*')
+        .eq('id', goalId)
+        .single();
+
+      if (updatedGoal) {
+        try {
+          // Call schedule generation endpoint
+          const apiUrl = process.env.API_URL || 'http://localhost:8080';
+          const scheduleResponse = await axios.post(
+            `${apiUrl}/api/schedule/generate-for-goal`,
+            {
+              user_id: goal.user_id,
+              goal_id: goalId,
+              preferred_days: updatedGoal.preferred_days,
+              preferred_time: updatedGoal.preferred_time,
+            }
+          );
+
+          const scheduleResult = scheduleResponse.data;
+          console.log(`📅 Auto-generated schedule: ${scheduleResult.blocksCreated || 0} blocks`);
+          
+          return res.json({
+            success: true,
+            plan,
+            schedule: scheduleResult,
+            message: `Training plan created and ${scheduleResult.blocksCreated || 0} sessions scheduled!`,
+          });
+        } catch (scheduleErr: any) {
+          console.error('⚠️ Schedule generation failed (non-fatal):', scheduleErr.message);
+          // Still return success - plan was created, schedule can be generated later
+        }
+      }
 
       return res.json({
         success: true,

@@ -21,6 +21,7 @@ import {
   CheckCircle,
   Circle,
   Ban,
+  Calendar,
 } from 'lucide-react';
 import { scheduleAPI } from '@/lib/api';
 
@@ -70,6 +71,8 @@ interface HourlyCalendarProps {
   availability?: UserAvailability | null;
   userId: string;
   onBlockUpdate?: () => void;
+  weekOffset: number;
+  setWeekOffset: (offset: number | ((prev: number) => number)) => void;
 }
 
 interface DroppableData {
@@ -112,6 +115,7 @@ const getBlockStyle = (type: string, category?: string, createdBy?: string): str
     education: 'bg-cyan-100 border-cyan-400 text-cyan-800',
     creative: 'bg-pink-100 border-pink-400 text-pink-800',
     climbing: 'bg-emerald-100 border-emerald-400 text-emerald-800',
+    mental_health: 'bg-teal-100 border-teal-400 text-teal-800',
   };
   return colors[category || ''] || 'bg-gray-100 border-gray-400 text-gray-800';
 };
@@ -638,6 +642,106 @@ function SessionDetailModal({ block, onClose, onComplete, onDelete }: SessionDet
 }
 
 // ============================================================
+// APPLY TO FUTURE MODAL
+// ============================================================
+
+interface ApplyToFutureModalProps {
+  pendingMove: {
+    block: ScheduleBlock;
+    newStart: string;
+    newDayIndex: number;
+    newHour: number;
+    newMinute: number;
+  } | null;
+  onConfirm: (applyToFuture: boolean) => void;
+  onCancel: () => void;
+  isLoading?: boolean;
+}
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function ApplyToFutureModal({ pendingMove, onConfirm, onCancel, isLoading }: ApplyToFutureModalProps) {
+  if (!pendingMove) return null;
+
+  const { block, newDayIndex, newHour, newMinute } = pendingMove;
+  
+  // Parse session name from notes
+  const notesParts = (block.notes || '').split('|||');
+  const sessionName = notesParts[0] || block.goals?.name || 'this session';
+  
+  // Format new time
+  const newTimeStr = format(
+    setMinutes(setHours(new Date(), newHour), newMinute),
+    'h:mm a'
+  );
+  const newDayStr = DAY_NAMES[newDayIndex];
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onCancel}>
+      <div 
+        className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="bg-gradient-to-r from-purple-500 to-blue-500 p-4 text-white">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-white/20 rounded-lg">
+              <GripVertical className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg">Session Moved</h3>
+              <p className="text-sm opacity-80">Apply this change to future sessions?</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
+          <div className="bg-gray-50 rounded-xl p-4 mb-6">
+            <div className="font-medium text-gray-900 mb-2">{sessionName}</div>
+            <div className="text-sm text-gray-600">
+              → Moving to <span className="font-medium text-purple-600">{newDayStr}</span> at{' '}
+              <span className="font-medium text-purple-600">{newTimeStr}</span>
+            </div>
+          </div>
+
+          <p className="text-sm text-gray-600 mb-6">
+            Would you like to apply this time change to all future "{sessionName}" sessions, 
+            or just this one?
+          </p>
+
+          {/* Actions */}
+          <div className="space-y-3">
+            <button
+              onClick={() => onConfirm(true)}
+              disabled={isLoading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-500 text-white rounded-xl hover:bg-purple-600 font-medium disabled:opacity-50 transition-colors"
+            >
+              <Calendar className="w-4 h-4" />
+              Apply to all future sessions
+            </button>
+            <button
+              onClick={() => onConfirm(false)}
+              disabled={isLoading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 font-medium disabled:opacity-50 transition-colors"
+            >
+              Just this session
+            </button>
+            <button
+              onClick={onCancel}
+              disabled={isLoading}
+              className="w-full px-4 py-2 text-gray-500 hover:text-gray-700 text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN COMPONENT
 // ============================================================
 
@@ -646,17 +750,25 @@ export default function HourlyCalendar({
   availability,
   userId,
   onBlockUpdate,
+  weekOffset,
+  setWeekOffset,
 }: HourlyCalendarProps) {
   const queryClient = useQueryClient();
-  const [weekOffset, setWeekOffset] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [pendingMove, setPendingMove] = useState<{
+    block: ScheduleBlock;
+    newStart: string;
+    newDayIndex: number;
+    newHour: number;
+    newMinute: number;
+  } | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<{ day: string; hour: number } | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null);
   const [activeBlock, setActiveBlock] = useState<ScheduleBlock | null>(null);
   const [isOverBlocked, setIsOverBlocked] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Calculate week dates
+  // Calculate week dates based on weekOffset from parent
   const today = new Date();
   const weekStart = startOfWeek(addDays(today, weekOffset * 7), { weekStartsOn: 0 });
   const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -709,6 +821,41 @@ export default function HourlyCalendar({
       onBlockUpdate?.();
     },
   });
+
+  const updateFutureMutation = useMutation({
+    mutationFn: ({ blockId, scheduled_start, applyToFuture }: { 
+      blockId: string; 
+      scheduled_start: string;
+      applyToFuture: boolean;
+    }) => scheduleAPI.updateBlockWithFuture(blockId, scheduled_start, applyToFuture),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['schedule'] });
+      onBlockUpdate?.();
+      if (data.updatedCount > 1) {
+        alert(`✅ Updated ${data.updatedCount} sessions`);
+      }
+    },
+  });
+
+  // Handle confirming a move (just this one or all future)
+  const handleConfirmMove = (applyToFuture: boolean) => {
+    if (!pendingMove) return;
+    
+    if (applyToFuture) {
+      updateFutureMutation.mutate({
+        blockId: pendingMove.block.id,
+        scheduled_start: pendingMove.newStart,
+        applyToFuture: true,
+      });
+    } else {
+      updateBlockMutation.mutate({
+        blockId: pendingMove.block.id,
+        scheduled_start: pendingMove.newStart,
+      });
+    }
+    
+    setPendingMove(null);
+  };
 
   // Generate availability blocks (work hours, sleep, commute)
   const availabilityBlocks = useMemo(() => {
@@ -926,11 +1073,14 @@ export default function HourlyCalendar({
     // Calculate new scheduled_start
     const targetDate = weekDates[dropData.dayIndex];
     const newStart = setMinutes(setHours(targetDate, dropData.hour), dropData.minute);
-
-    // Update the block
-    updateBlockMutation.mutate({
-      blockId: block.id,
-      scheduled_start: newStart.toISOString(),
+    
+    // Store pending move to show modal
+    setPendingMove({
+      block,
+      newStart: newStart.toISOString(),
+      newDayIndex: dropData.dayIndex,
+      newHour: dropData.hour,
+      newMinute: dropData.minute,
     });
   };
 
@@ -1184,6 +1334,14 @@ export default function HourlyCalendar({
           onClose={() => setSelectedBlock(null)}
           onComplete={(id) => completeBlockMutation.mutate(id)}
           onDelete={(id) => deleteBlockMutation.mutate(id)}
+        />
+
+        {/* Apply to Future Modal */}
+        <ApplyToFutureModal
+          pendingMove={pendingMove}
+          onConfirm={handleConfirmMove}
+          onCancel={() => setPendingMove(null)}
+          isLoading={updateFutureMutation.isPending || updateBlockMutation.isPending}
         />
       </div>
 

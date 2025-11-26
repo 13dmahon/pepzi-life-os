@@ -95,6 +95,8 @@ export interface Goal {
   progress?: any;
   created_at?: string;
   micro_goals?: any[];
+  preferred_days?: string[];
+  preferred_time?: 'morning' | 'afternoon' | 'evening' | 'any';
 }
 
 export interface ScheduleBlock {
@@ -356,6 +358,18 @@ export const scheduleAPI = {
     return response.data.blocks;
   },
 
+  // Get blocks for a specific date range
+  getBlocks: async (userId: string, startDate: string, endDate: string): Promise<{ blocks: ScheduleBlock[] }> => {
+    const response = await api.get('/api/schedule', {
+      params: {
+        user_id: userId,
+        start_date: startDate,
+        end_date: endDate,
+      },
+    });
+    return response.data;
+  },
+
   // Get current week's schedule
   getWeek: async (userId: string, weekOffset: number = 0): Promise<ScheduleBlock[]> => {
     const today = new Date();
@@ -402,6 +416,19 @@ export const scheduleAPI = {
     return response.data.block;
   },
 
+  // Update a block and optionally apply to all future matching sessions
+  updateBlockWithFuture: async (
+    blockId: string,
+    scheduledStart: string,
+    applyToFuture: boolean
+  ): Promise<{ block: ScheduleBlock; updatedCount: number }> => {
+    const response = await api.patch(`/api/schedule/${blockId}/with-future`, {
+      scheduled_start: scheduledStart,
+      apply_to_future: applyToFuture,
+    });
+    return response.data;
+  },
+
   // Mark a block as complete
   completeBlock: async (blockId: string): Promise<ScheduleBlock> => {
     const response = await api.patch(`/api/schedule/${blockId}/complete`);
@@ -417,6 +444,22 @@ export const scheduleAPI = {
   autoGenerate: async (userId: string): Promise<ScheduleGenerateResponse> => {
     const response = await api.post('/api/schedule/auto-generate', {
       user_id: userId,
+    });
+    return response.data;
+  },
+
+  // Generate full schedule for a specific goal
+  generateForGoal: async (
+    userId: string,
+    goalId: string,
+    preferredDays?: string[],
+    preferredTime?: string
+  ): Promise<{ success: boolean; blocksCreated: number; warning: string | null; message: string }> => {
+    const response = await api.post('/api/schedule/generate-for-goal', {
+      user_id: userId,
+      goal_id: goalId,
+      preferred_days: preferredDays,
+      preferred_time: preferredTime,
     });
     return response.data;
   },

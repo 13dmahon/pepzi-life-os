@@ -685,6 +685,331 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 /**
+ * 🆕 Generate schedule for a SINGLE GOAL for its ENTIRE DURATION
+ * Called automatically when a training plan is created
+ */
+async function generateFullGoalSchedule(
+  goal: any,
+  userId: string,
+  preferredDays: string[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+  preferredTime: 'morning' | 'afternoon' | 'evening' | 'any' = 'any'
+): Promise<{ blocksCreated: number; warning: string | null }> {
+  console.log(`\n🗓️ ========== GENERATING FULL SCHEDULE FOR GOAL ==========`);
+  console.log(`📋 Goal: ${goal.name}`);
+  console.log(`📅 Preferred days: ${preferredDays.join(', ')}`);
+  console.log(`⏰ Preferred time: ${preferredTime}`);
+
+  const plan = goal.plan;
+  if (!plan || !plan.weekly_hours || plan.weekly_hours <= 0) {
+    console.log('⚠️ No valid plan found');
+    return { blocksCreated: 0, warning: 'No valid training plan' };
+  }
+
+  // Calculate duration
+  const startDate = new Date();
+  startDate.setHours(0, 0, 0, 0);
+  
+  let endDate: Date;
+  if (goal.target_date) {
+    endDate = new Date(goal.target_date);
+  } else {
+    // Default to total_weeks from plan
+    const totalWeeks = plan.total_weeks || Math.ceil((plan.total_estimated_hours || 50) / plan.weekly_hours);
+    endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + totalWeeks * 7);
+  }
+
+  const totalWeeks = Math.ceil((endDate.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
+  console.log(`📆 Duration: ${totalWeeks} weeks (${startDate.toDateString()} → ${endDate.toDateString()})`);
+
+  // Get user availability
+  const { data: availability } = await supabase
+    .from('user_availability')
+    .select('*')
+    .eq('user_id', userId)
+    .single();
+
+  const effectiveAvailability = availability || {
+    wake_time: '06:00',
+    sleep_time: '22:00',
+    work_schedule: {},
+    fixed_commitments: [],
+    daily_commute_mins: 0,
+    preferred_workout_time: preferredTime,
+  };
+
+  // Get ALL existing user-created blocks for the entire period
+  const { data: existingUserBlocks } = await supabase
+    .from('schedule_blocks')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('scheduled_start', startDate.toISOString())
+    .lt('scheduled_start', endDate.toISOString())
+    .or('created_by.eq.user,type.in.(work,commute,event,social)');
+
+  console.log(`📦 Existing blocks to schedule around: ${existingUserBlocks?.length || 0}`);
+
+  // Delete any existing auto-generated blocks for THIS GOAL
+  await supabase
+    .from('schedule_blocks')
+    .delete()
+    .eq('user_id', userId)
+    .eq('goal_id', goal.id)
+    .eq('created_by', 'auto');
+
+  // Build sessions from the weekly plan
+  const weeklyPlan = plan.weekly_plan;
+  const allBlocks: any[] = [];
+  let warning: string | null = null;
+
+  const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const sessionsPerWeek = plan.sessions_per_week || 3;
+
+  // For each week in the goal duration
+  for (let weekNum = 0; weekNum < totalWeeks; weekNum++) {
+    const weekStart = new Date(startDate);
+    weekStart.setDate(startDate.getDate() + weekNum * 7);
+
+    // Get sessions for this specific week from the plan (if detailed weeks exist)
+    let weekSessions: any[] = [];
+    
+    if (weeklyPlan?.weeks && weeklyPlan.weeks[weekNum]) {
+      // Use the detailed week plan
+      weekSessions = weeklyPlan.weeks[weekNum].sessions || [];
+    } else if (weeklyPlan?.weeks && weeklyPlan.weeks.length > 0) {
+      // Cycle through available weeks
+      const cycleIndex = weekNum % weeklyPlan.weeks.length;
+      weekSessions = weeklyPlan.weeks[cycleIndex]?.sessions || [];
+    } else {
+      // Fallback: create generic sessions
+      const sessionDuration = Math.round((plan.weekly_hours * 60) / sessionsPerWeek);
+      for (let i = 0; i < sessionsPerWeek; i++) {
+        weekSessions.push({
+          name: `${goal.name} Session`,
+          duration_mins: sessionDuration,
+          description: `Training session ${i + 1}`,
+        });
+      }
+    }
+
+    // Track what's been scheduled this week
+    const scheduledThisWeek: Array<{ day: string; start: number; end: number }> = [];
+
+    // Group existing blocks by day for this week
+    const userBlocksByDay: Record<string, Array<{ start: number; end: number }>> = {};
+    DAYS.forEach(day => { userBlocksByDay[day] = []; });
+
+    (existingUserBlocks || []).forEach((block: any) => {
+      const blockDate = new Date(block.scheduled_start);
+      const blockWeekStart = new Date(blockDate);
+      blockWeekStart.setDate(blockDate.getDate() - blockDate.getDay());
+      blockWeekStart.setHours(0, 0, 0, 0);
+
+      if (blockWeekStart.getTime() === weekStart.getTime()) {
+        const dayName = DAYS[blockDate.getDay()];
+        const startMins = blockDate.getHours() * 60 + blockDate.getMinutes();
+        userBlocksByDay[dayName].push({
+          start: startMins,
+          end: startMins + (block.duration_mins || 60),
+        });
+      }
+    });
+
+    // Schedule each session on preferred days first
+    let sessionIndex = 0;
+    for (const session of weekSessions) {
+      const duration = session.duration_mins || 60;
+      let scheduled = false;
+
+      // Try preferred days first
+      for (const dayName of preferredDays) {
+        if (scheduled) break;
+        
+        const dayIndex = DAYS.indexOf(dayName.toLowerCase());
+        if (dayIndex === -1) continue;
+
+        const dayDate = new Date(weekStart);
+        dayDate.setDate(weekStart.getDate() + dayIndex);
+
+        // Skip if in the past
+        if (dayDate < new Date()) continue;
+
+        // Get available slots for this day
+        const availSlots = getAvailableSlots(dayName, effectiveAvailability, userBlocksByDay[dayName]);
+
+        // Find a slot that doesn't conflict with already-scheduled sessions this week
+        for (const slot of availSlots) {
+          if (scheduled) break;
+          
+          // Check slot size
+          if (slot.end - slot.start < duration) continue;
+
+          // Check for conflicts with sessions we've already scheduled today
+          const todayScheduled = scheduledThisWeek.filter(s => s.day === dayName);
+          let hasConflict = false;
+
+          const candidateStart = slot.start;
+          const candidateEnd = candidateStart + duration;
+
+          for (const existing of todayScheduled) {
+            if (candidateStart < existing.end + 15 && candidateEnd > existing.start - 15) {
+              hasConflict = true;
+              break;
+            }
+          }
+
+          if (!hasConflict) {
+            // Create the block
+            const scheduledTime = new Date(dayDate);
+            scheduledTime.setHours(Math.floor(candidateStart / 60), candidateStart % 60, 0, 0);
+
+            allBlocks.push({
+              user_id: userId,
+              goal_id: goal.id,
+              type: goal.category === 'fitness' || goal.category === 'climbing' ? 'workout' : 'training',
+              scheduled_start: scheduledTime.toISOString(),
+              duration_mins: duration,
+              status: 'scheduled',
+              notes: [session.name, session.description || '', session.tip || ''].join('|||'),
+              created_by: 'auto',
+              flexibility: 'movable',
+            });
+
+            scheduledThisWeek.push({ day: dayName, start: candidateStart, end: candidateEnd });
+            scheduled = true;
+          }
+        }
+      }
+
+      // If not scheduled on preferred days, try any day
+      if (!scheduled) {
+        for (const dayName of DAYS) {
+          if (scheduled) break;
+          if (preferredDays.map(d => d.toLowerCase()).includes(dayName)) continue; // Already tried
+
+          const dayIndex = DAYS.indexOf(dayName);
+          const dayDate = new Date(weekStart);
+          dayDate.setDate(weekStart.getDate() + dayIndex);
+
+          if (dayDate < new Date()) continue;
+
+          const availSlots = getAvailableSlots(dayName, effectiveAvailability, userBlocksByDay[dayName]);
+
+          for (const slot of availSlots) {
+            if (scheduled) break;
+            if (slot.end - slot.start < duration) continue;
+
+            const todayScheduled = scheduledThisWeek.filter(s => s.day === dayName);
+            let hasConflict = false;
+            const candidateStart = slot.start;
+            const candidateEnd = candidateStart + duration;
+
+            for (const existing of todayScheduled) {
+              if (candidateStart < existing.end + 15 && candidateEnd > existing.start - 15) {
+                hasConflict = true;
+                break;
+              }
+            }
+
+            if (!hasConflict) {
+              const scheduledTime = new Date(dayDate);
+              scheduledTime.setHours(Math.floor(candidateStart / 60), candidateStart % 60, 0, 0);
+
+              allBlocks.push({
+                user_id: userId,
+                goal_id: goal.id,
+                type: goal.category === 'fitness' || goal.category === 'climbing' ? 'workout' : 'training',
+                scheduled_start: scheduledTime.toISOString(),
+                duration_mins: duration,
+                status: 'scheduled',
+                notes: [session.name, session.description || '', session.tip || ''].join('|||'),
+                created_by: 'auto',
+                flexibility: 'movable',
+              });
+
+              scheduledThisWeek.push({ day: dayName, start: candidateStart, end: candidateEnd });
+              scheduled = true;
+            }
+          }
+        }
+      }
+
+      if (!scheduled) {
+        warning = `Some sessions couldn't be scheduled. Consider adjusting your availability or reducing weekly hours.`;
+      }
+
+      sessionIndex++;
+    }
+  }
+
+  // Insert all blocks
+  if (allBlocks.length > 0) {
+    // Batch insert (Supabase handles large inserts well, but let's chunk for safety)
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < allBlocks.length; i += BATCH_SIZE) {
+      const batch = allBlocks.slice(i, i + BATCH_SIZE);
+      const { error: insertError } = await supabase
+        .from('schedule_blocks')
+        .insert(batch);
+
+      if (insertError) {
+        console.error('Insert batch error:', insertError);
+        throw insertError;
+      }
+    }
+  }
+
+  console.log(`✅ Created ${allBlocks.length} schedule blocks for ${totalWeeks} weeks`);
+
+  return { blocksCreated: allBlocks.length, warning };
+}
+
+/**
+ * POST /api/schedule/generate-for-goal
+ * Generate full schedule for a specific goal (called after plan creation)
+ */
+router.post('/generate-for-goal', async (req: Request, res: Response) => {
+  try {
+    const { user_id, goal_id, preferred_days, preferred_time } = req.body;
+
+    if (!user_id || !goal_id) {
+      return res.status(400).json({ error: 'Missing user_id or goal_id' });
+    }
+
+    // Get the goal
+    const { data: goal, error: goalError } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('id', goal_id)
+      .single();
+
+    if (goalError || !goal) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+
+    const result = await generateFullGoalSchedule(
+      goal,
+      user_id,
+      preferred_days || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+      preferred_time || 'any'
+    );
+
+    return res.json({
+      success: true,
+      ...result,
+      message: `Generated ${result.blocksCreated} sessions for "${goal.name}"`,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Generate for goal error:', error);
+    return res.status(500).json({
+      error: 'Failed to generate schedule',
+      message: error.message,
+    });
+  }
+});
+
+/**
  * POST /api/schedule/auto-generate
  * Auto-generate weekly schedule based on goals and availability
  * 🆕 Now returns warnings if sessions don't fit
@@ -852,6 +1177,120 @@ router.patch('/:id', async (req: Request, res: Response) => {
     console.error('❌ Update error:', error);
     return res.status(500).json({
       error: 'Failed to update block',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * PATCH /api/schedule/:id/with-future
+ * Update a schedule block and optionally apply the same time change to all future matching sessions
+ */
+router.patch('/:id/with-future', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { scheduled_start, apply_to_future } = req.body;
+
+    if (!scheduled_start) {
+      return res.status(400).json({ error: 'scheduled_start is required' });
+    }
+
+    // Get the original block
+    const { data: originalBlock, error: fetchError } = await supabase
+      .from('schedule_blocks')
+      .select('*, goals(name, category)')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !originalBlock) {
+      return res.status(404).json({ error: 'Block not found' });
+    }
+
+    // Update the current block
+    const { data: updatedBlock, error: updateError } = await supabase
+      .from('schedule_blocks')
+      .update({ scheduled_start })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    let updatedCount = 1;
+
+    // If apply_to_future, update all future matching sessions
+    if (apply_to_future && originalBlock.goal_id && originalBlock.notes) {
+      const originalDate = new Date(originalBlock.scheduled_start);
+      const newDate = new Date(scheduled_start);
+      
+      // Extract session name from notes (format: "name|||description|||tip")
+      const sessionName = originalBlock.notes.split('|||')[0];
+      
+      // Calculate the new day of week and time
+      const newDayOfWeek = newDate.getDay(); // 0 = Sunday, 6 = Saturday
+      const newHour = newDate.getHours();
+      const newMinute = newDate.getMinutes();
+      
+      console.log(`🔄 Applying to future sessions: "${sessionName}" -> ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][newDayOfWeek]} ${newHour}:${String(newMinute).padStart(2, '0')}`);
+      
+      // Find all future blocks with same goal_id and session name
+      const { data: futureBlocks, error: futureError } = await supabase
+        .from('schedule_blocks')
+        .select('id, scheduled_start, notes')
+        .eq('goal_id', originalBlock.goal_id)
+        .gt('scheduled_start', originalBlock.scheduled_start) // Only future blocks
+        .neq('id', id) // Exclude current block
+        .eq('status', 'scheduled'); // Only scheduled, not completed
+
+      if (futureError) throw futureError;
+
+      // Filter to only matching session names and update each
+      const matchingBlocks = (futureBlocks || []).filter(block => {
+        const blockSessionName = (block.notes || '').split('|||')[0];
+        return blockSessionName === sessionName;
+      });
+
+      console.log(`📦 Found ${matchingBlocks.length} future matching sessions`);
+
+      // Update each matching block
+      for (const block of matchingBlocks) {
+        const blockDate = new Date(block.scheduled_start);
+        
+        // Calculate days difference to get to the new day of week
+        const currentDayOfWeek = blockDate.getDay();
+        let daysDiff = newDayOfWeek - currentDayOfWeek;
+        if (daysDiff < 0) daysDiff += 7; // Wrap around if needed
+        if (daysDiff === 0) daysDiff = 0; // Same day, no change
+        
+        // Create new date at the same week but new day/time
+        const newBlockDate = new Date(blockDate);
+        newBlockDate.setDate(blockDate.getDate() + daysDiff);
+        newBlockDate.setHours(newHour, newMinute, 0, 0);
+
+        const { error: blockUpdateError } = await supabase
+          .from('schedule_blocks')
+          .update({ scheduled_start: newBlockDate.toISOString() })
+          .eq('id', block.id);
+
+        if (!blockUpdateError) {
+          updatedCount++;
+        }
+      }
+
+      console.log(`✅ Updated ${updatedCount} sessions total (1 current + ${matchingBlocks.length} future)`);
+    }
+
+    return res.json({
+      block: updatedBlock,
+      updatedCount,
+      message: apply_to_future 
+        ? `Updated ${updatedCount} sessions` 
+        : 'Session moved',
+    });
+  } catch (error: any) {
+    console.error('❌ Update with future error:', error);
+    return res.status(500).json({
+      error: 'Failed to update sessions',
       message: error.message,
     });
   }

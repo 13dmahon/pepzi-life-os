@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { goalsAPI } from '@/lib/api';
 import { useUserStore } from '@/lib/store';
-import { Target, Plus, MessageCircle, TrendingUp, Calendar, Clock, Trash2 } from 'lucide-react';
+import { Target, Plus, TrendingUp, Calendar, Clock, Trash2 } from 'lucide-react';
 import AddGoalModal from '@/components/goals/AddGoalModal';
 import GoalDetailView from '@/components/goals/GoalDetailView';
 import type { Goal } from '@/lib/api';
@@ -14,8 +14,6 @@ export default function GoalsPage() {
   const queryClient = useQueryClient();
   
   const [showAddGoal, setShowAddGoal] = useState(false);
-  const [showExtract, setShowExtract] = useState(false);
-  const [dreamsText, setDreamsText] = useState('');
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
   const [deletingGoalId, setDeletingGoalId] = useState<string | null>(null);
 
@@ -29,15 +27,6 @@ export default function GoalsPage() {
     queryKey: ['goals-progress', userId],
     queryFn: () => goalsAPI.getAllProgress(userId),
     enabled: goals.length > 0,
-  });
-
-  const extractMutation = useMutation({
-    mutationFn: (text: string) => goalsAPI.extractFromDreams(userId, text),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['goals'] });
-      setShowExtract(false);
-      setDreamsText('');
-    },
   });
 
   const deleteMutation = useMutation({
@@ -126,17 +115,10 @@ export default function GoalsPage() {
           <div className="flex gap-3 flex-wrap">
             <button
               onClick={() => setShowAddGoal(true)}
-              className="px-6 py-3 bg-white border-2 border-purple-500 text-purple-600 rounded-full font-medium hover:bg-purple-50 transition-all flex items-center gap-2"
+              className="px-6 py-3 bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-full font-medium hover:shadow-lg transition-all flex items-center gap-2"
             >
               <Plus className="w-5 h-5" />
               <span className="hidden md:inline">Add Goal</span>
-            </button>
-            <button
-              onClick={() => setShowExtract(true)}
-              className="px-6 py-3 bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-full font-medium hover:shadow-lg transition-all flex items-center gap-2"
-            >
-              <MessageCircle className="w-5 h-5" />
-              <span className="hidden md:inline">Import Dreams</span>
             </button>
           </div>
         </div>
@@ -207,40 +189,6 @@ export default function GoalsPage() {
           userId={userId}
         />
 
-        {/* Extract Modal */}
-        {showExtract && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl p-8 max-w-3xl w-full">
-              <h2 className="text-3xl font-bold mb-2">Import Multiple Goals</h2>
-              <p className="text-gray-600 mb-6">
-                Tell me about all the goals you'd like to add. Don't worry about structure—just brain dump!
-              </p>
-              <textarea
-                value={dreamsText}
-                onChange={(e) => setDreamsText(e.target.value)}
-                placeholder="I want to run a sub-20 5K by June, learn conversational Spanish within 6 months, build a SaaS to £5K MRR by end of year, read 24 books this year, get stronger at gym and hit 100kg bench press, travel to Japan in October..."
-                className="w-full h-48 px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:ring-4 focus:ring-purple-100 outline-none resize-none"
-              />
-              <div className="text-sm text-gray-500 mb-4">{dreamsText.length} characters</div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowExtract(false)}
-                  className="flex-1 px-6 py-3 border-2 border-gray-200 rounded-full font-medium hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => extractMutation.mutate(dreamsText)}
-                  disabled={extractMutation.isPending || !dreamsText.trim()}
-                  className="flex-1 px-6 py-3 bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-full font-medium hover:shadow-lg disabled:opacity-50 transition-all"
-                >
-                  {extractMutation.isPending ? 'Extracting...' : '🚀 Extract Goals'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Goals Grid */}
         {isLoading ? (
           <div className="text-center py-20">
@@ -258,15 +206,10 @@ export default function GoalsPage() {
             <div className="flex gap-4 justify-center flex-wrap">
               <button
                 onClick={() => setShowAddGoal(true)}
-                className="px-8 py-3 bg-white border-2 border-purple-500 text-purple-600 rounded-full font-medium hover:bg-purple-50 transition-all"
+                className="px-8 py-3 bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-full font-medium hover:shadow-lg transition-all flex items-center gap-2"
               >
-                + Add Goal
-              </button>
-              <button
-                onClick={() => setShowExtract(true)}
-                className="px-8 py-3 bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-full font-medium hover:shadow-lg transition-all"
-              >
-                💬 Import Dreams
+                <Plus className="w-5 h-5" />
+                Add Your First Goal
               </button>
             </div>
           </div>
