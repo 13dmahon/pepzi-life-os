@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Send, Sparkles, Check, X } from 'lucide-react';
+import { chatAPI } from '@/lib/api';
 
 interface Message {
   id: string;
@@ -62,12 +63,10 @@ export default function TodayChat({ userId, onActivityLogged, selectedTask }: To
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Focus input when task is selected
   useEffect(() => {
     if (selectedTask) {
       setInput(`I just completed "${selectedTask.name}"`);
@@ -90,17 +89,11 @@ export default function TodayChat({ userId, onActivityLogged, selectedTask }: To
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/chat/message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          message: messageText,
-          conversation_state: conversationState,
-        }),
+      const data = await chatAPI.smartMessage({
+        user_id: userId,
+        message: messageText,
+        conversation_state: conversationState,
       });
-
-      const data = await response.json();
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -112,7 +105,6 @@ export default function TodayChat({ userId, onActivityLogged, selectedTask }: To
       setMessages((prev) => [...prev, assistantMessage]);
       setConversationState(data.state);
 
-      // Check if we need to show confirmation
       if (data.show_confirmation && data.confirmation_data) {
         setConfirmation(data.confirmation_data);
       }
@@ -141,17 +133,11 @@ export default function TodayChat({ userId, onActivityLogged, selectedTask }: To
     setIsConfirming(true);
 
     try {
-      const response = await fetch('/api/chat/confirm-log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          block_id: confirmation.block_id,
-          tracked_data: confirmation.tracked_data,
-        }),
+      const data = await chatAPI.confirmLog({
+        user_id: userId,
+        block_id: confirmation.block_id,
+        tracked_data: confirmation.tracked_data,
       });
-
-      const data = await response.json();
 
       if (data.success) {
         const successMessage: Message = {
@@ -162,7 +148,7 @@ export default function TodayChat({ userId, onActivityLogged, selectedTask }: To
         };
         setMessages((prev) => [...prev, successMessage]);
         setConfirmation(null);
-        setConversationState(null); // Reset logging state
+        setConversationState(null);
         onActivityLogged?.();
       }
     } catch (error) {
@@ -185,7 +171,6 @@ export default function TodayChat({ userId, onActivityLogged, selectedTask }: To
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="border-b bg-white/80 backdrop-blur-sm px-6 py-4 flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
@@ -198,7 +183,6 @@ export default function TodayChat({ userId, onActivityLogged, selectedTask }: To
         </div>
       </div>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="space-y-4 max-w-2xl mx-auto">
           {messages.map((message) => (
@@ -222,7 +206,6 @@ export default function TodayChat({ userId, onActivityLogged, selectedTask }: To
             </div>
           ))}
 
-          {/* Loading indicator */}
           {isLoading && (
             <div className="flex justify-start">
               <div className="bg-white shadow-md border border-gray-100 rounded-2xl px-4 py-3">
@@ -235,7 +218,6 @@ export default function TodayChat({ userId, onActivityLogged, selectedTask }: To
             </div>
           )}
 
-          {/* Confirmation Card */}
           {confirmation && (
             <div className="bg-white rounded-2xl shadow-lg border-2 border-green-200 overflow-hidden">
               <div className="bg-green-50 px-4 py-3 border-b border-green-200">
@@ -284,7 +266,6 @@ export default function TodayChat({ userId, onActivityLogged, selectedTask }: To
         </div>
       </div>
 
-      {/* Input */}
       <div className="border-t bg-white/80 backdrop-blur-sm px-6 py-4 flex-shrink-0">
         <form onSubmit={handleSubmit} className="max-w-2xl mx-auto">
           <div className="flex gap-3">

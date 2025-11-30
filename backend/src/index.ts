@@ -11,29 +11,21 @@ dotenv.config();
 
 const app = express();
 
-// CORS Configuration - Dynamic origin checker for Cloud Shell
+// CORS Configuration - Allow Cloud Run + Cloud Shell + localhost
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like curl, mobile apps)
     if (!origin) return callback(null, true);
     
-    // Remove query parameters from origin for matching
-    const cleanOrigin = origin.split('?')[0];
-    
-    // Allowed patterns
     const allowedPatterns = [
       /^https?:\/\/localhost:\d+$/,
-      /^https:\/\/3000-cs-291763640218-default\.cs-europe-west1-onse\.cloudshell\.dev$/,
-      /^https:\/\/3001-cs-291763640218-default\.cs-europe-west1-onse\.cloudshell\.dev$/,
-      /^https:\/\/8080-cs-291763640218-default\.cs-europe-west1-onse\.cloudshell\.dev$/
+      /^https:\/\/.*\.cloudshell\.dev$/,
+      /^https:\/\/.*\.run\.app$/,
     ];
     
-    const isAllowed = allowedPatterns.some(pattern => pattern.test(cleanOrigin));
-    
-    if (isAllowed) {
+    if (allowedPatterns.some(pattern => pattern.test(origin))) {
       callback(null, true);
     } else {
-      console.log('❌ CORS blocked origin:', origin);
+      console.log('❌ CORS blocked:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -44,7 +36,6 @@ app.use(cors({
 
 app.use(express.json());
 
-// Routes
 app.use('/api/chat', chatRoutes);
 app.use('/api/goals', goalRoutes);
 app.use('/api/schedule', scheduleRoutes);
@@ -52,41 +43,14 @@ app.use('/api/memory', memoryRoutes);
 app.use('/api/availability', availabilityRoutes);
 
 app.get('/health', (_req: Request, res: Response) => {
-  res.json({
-    status: 'ok',
-    service: 'pepzi-backend',
-    timestamp: new Date().toISOString()
-  });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 app.get('/', (_req: Request, res: Response) => {
-  res.json({
-    message: 'Pepzi Life OS API',
-    version: '1.0.0',
-    endpoints: {
-      health: '/health',
-      chat: '/api/chat',
-      goals: '/api/goals',
-      'goals.from-dreams': '/api/goals/from-dreams',
-      'goals.plan': '/api/goals/:id/plan',
-      schedule: '/api/schedule',
-      'schedule.today': '/api/schedule/today',
-      memory: '/api/memory',
-      'memory.recent': '/api/memory/recent',
-      'memory.search': '/api/memory/search',
-      availability: '/api/availability'
-    }
-  });
+  res.json({ message: 'Pepzi Life OS API', version: '1.0.0' });
 });
 
-const port = process.env.PORT || 8080;
-app.listen(port, () => {
-  console.log('🚀 Pepzi Backend starting...');
-  console.log(`📡 Server running on port ${port}`);
-  console.log(`✅ Ready to receive requests`);
-  console.log(`💬 Chat: http://localhost:${port}/api/chat`);
-  console.log(`🎯 Goals: http://localhost:${port}/api/goals`);
-  console.log(`📅 Schedule: http://localhost:${port}/api/schedule`);
-  console.log(`🧠 Memory: http://localhost:${port}/api/memory`);
-  console.log(`⏰ Availability: http://localhost:${port}/api/availability`);
+const port = parseInt(process.env.PORT || '8080', 10);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`🚀 Pepzi Backend running on port ${port}`);
 });

@@ -6,6 +6,7 @@ import { useUserStore } from '@/lib/store';
 import { Calendar as CalendarIcon, CheckCircle, Circle, Loader2 } from 'lucide-react';
 import TodayTaskCard from '@/components/today/TodayTaskCard';
 import TodayChat from '@/components/today/TodayChat';
+import { chatAPI } from '@/lib/api';
 
 interface TodayTask {
   id: string;
@@ -35,18 +36,16 @@ export default function TodayPage() {
   const queryClient = useQueryClient();
   const [selectedTask, setSelectedTask] = useState<TodayTask | null>(null);
 
-  // Fetch today's tasks
   const { data: todayData, isLoading } = useQuery({
     queryKey: ['today-summary', userId],
     queryFn: async () => {
-      const res = await fetch(`/api/chat/today-summary?user_id=${userId}`);
-      if (!res.ok) throw new Error('Failed to fetch today summary');
-      return res.json();
+      const data = await chatAPI.getTodaySummary(userId);
+      return data;
     },
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: 30000,
   });
 
-  const tasks: TodayTask[] = todayData?.tasks || [];
+  const tasks = (todayData?.tasks || []) as TodayTask[];
   const pendingTasks = tasks.filter((t) => t.status !== 'completed');
   const completedTasks = tasks.filter((t) => t.status === 'completed');
 
@@ -57,7 +56,6 @@ export default function TodayPage() {
   });
 
   const handleActivityLogged = () => {
-    // Refresh the task list
     queryClient.invalidateQueries({ queryKey: ['today-summary'] });
     setSelectedTask(null);
   };
