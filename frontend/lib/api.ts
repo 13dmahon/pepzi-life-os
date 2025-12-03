@@ -54,6 +54,8 @@ export interface TodayTask {
   status: string;
   completed_at?: string;
   tracked_data?: Record<string, any>;
+  notes?: string;
+  previous_notes?: string;
   tracking_requirements: Array<{
     key: string;
     label: string;
@@ -97,6 +99,7 @@ export interface Goal {
   micro_goals?: any[];
   preferred_days?: string[];
   preferred_time?: 'morning' | 'afternoon' | 'evening' | 'any';
+  intensity?: string;
 }
 
 export interface ScheduleBlock {
@@ -109,6 +112,8 @@ export interface ScheduleBlock {
   notes?: string;
   goal_id?: string;
   created_by?: string;
+  completed_at?: string;
+  original_scheduled_start?: string;
   goals?: { name: string; category?: string };
 }
 
@@ -171,6 +176,21 @@ export interface ScheduleGenerateResponse {
   };
 }
 
+export interface RecurringBlockResponse {
+  success: boolean;
+  blocksCreated: number;
+  type: string;
+  days: string[];
+  time: string;
+  duration_mins: number;
+  schedule_until: string;
+  message: string;
+}
+
+// ============================================================
+// CHAT API
+// ============================================================
+
 export const chatAPI = {
   sendMessage: async (data: ChatMessage): Promise<ChatResponse> => {
     const response = await api.post('/api/chat', data);
@@ -192,7 +212,16 @@ export const chatAPI = {
     const response = await api.get(`/api/chat/goal-progress/${goalId}`);
     return response.data;
   },
+  // NEW: Get missed sessions for nudges
+  getMissedSessions: async (userId: string): Promise<{ sessions: TodayTask[] }> => {
+    const response = await api.get('/api/chat/missed-sessions', { params: { user_id: userId } });
+    return response.data;
+  },
 };
+
+// ============================================================
+// GOALS API
+// ============================================================
 
 export const goalsAPI = {
   getGoals: async (userId: string): Promise<Goal[]> => {
@@ -237,7 +266,69 @@ export const goalsAPI = {
     const response = await api.get('/api/goals/all-progress', { params: { user_id: userId } });
     return response.data;
   },
+  // NEW: Update goal intensity
+  updateIntensity: async (goalId: string, intensity: string): Promise<any> => {
+    const response = await api.patch(`/api/goals/${goalId}/intensity`, { intensity });
+    return response.data;
+  },
+  // NEW: Update goal preferences (days, hours, sessions)
+  updatePreferences: async (goalId: string, data: { preferred_days?: string[]; weekly_hours?: number; sessions_per_week?: number }): Promise<any> => {
+    const response = await api.patch(`/api/goals/${goalId}/preferences`, data);
+    return response.data;
+  },
+  // NEW: Get intensify preview (before/after comparison)
+  getIntensifyPreview: async (goalId: string): Promise<{
+    success: boolean;
+    preview: Array<{
+      id: string;
+      before: { name: string; description: string; tip: string; duration_mins: number };
+      after: { name: string; description: string; tip: string; duration_mins: number };
+    }>;
+    total_sessions: number;
+    message: string;
+  }> => {
+    const response = await api.post(`/api/goals/${goalId}/intensify-preview`);
+    return response.data;
+  },
+
+  // NEW: Apply intensified sessions
+  applyIntensify: async (goalId: string, preview: any[]): Promise<{
+    success: boolean;
+    sessions_updated: number;
+    message: string;
+  }> => {
+    const response = await api.post(`/api/goals/${goalId}/intensify-apply`, { preview });
+    return response.data;
+  },
+
+  // NEW Phase 2: Get time budget (work, commute, events, training, free)
+  getTimeBudget: async (userId: string): Promise<{
+    work_hours: number;
+    commute_hours: number;
+    event_hours: number;
+    training_hours: number;
+    committed_hours: number;
+    awake_hours: number;
+    free_hours: number;
+  }> => {
+    const response = await api.get('/api/goals/time-budget', { params: { user_id: userId } });
+    return response.data;
+  },
+
+  // NEW Phase 2: Get full schedule for a goal (all sessions grouped by week)
+  getGoalSchedule: async (goalId: string): Promise<{
+    sessions: any[];
+    sessions_by_week: Record<number, any[]>;
+    total_sessions: number;
+  }> => {
+    const response = await api.get(`/api/goals/${goalId}/schedule`);
+    return response.data;
+  },
 };
+
+// ============================================================
+// SCHEDULE API
+// ============================================================
 
 export const scheduleAPI = {
   getSchedule: async (userId: string, startDate?: string, endDate?: string): Promise<ScheduleBlock[]> => {
@@ -266,6 +357,17 @@ export const scheduleAPI = {
     const response = await api.post('/api/schedule', block);
     return response.data.block;
   },
+  createRecurringBlock: async (data: {
+    user_id: string;
+    type: string;
+    days: string[];
+    start_time: string;
+    end_time: string;
+    notes?: string;
+  }): Promise<RecurringBlockResponse> => {
+    const response = await api.post('/api/schedule/recurring', data);
+    return response.data;
+  },
   updateBlock: async (blockId: string, updates: { scheduled_start?: string; duration_mins?: number; notes?: string }): Promise<ScheduleBlock> => {
     const response = await api.patch(`/api/schedule/${blockId}`, updates);
     return response.data.block;
@@ -293,7 +395,45 @@ export const scheduleAPI = {
     const response = await api.patch(`/api/schedule/${blockId}/reschedule`, { new_start_time: newStartTime });
     return response.data.block;
   },
+
+  // ============================================================
+  // NEW PHASE 1 METHODS
+  // ============================================================
+
+  // Complete a block with notes only (simplified - no metrics)
+  completeBlockWithNotes: async (blockId: string, notes: string): Promise<{ success: boolean; block: ScheduleBlock; message: string }> => {
+    const response = await api.patch(`/api/schedule/${blockId}/complete-with-notes`, { notes });
+    return response.data;
+  },
+
+  // Skip a block (marks as skipped, calculates deadline impact)
+  skipBlock: async (blockId: string): Promise<{ success: boolean; deadline_impact: string | null; message: string }> => {
+    const response = await api.patch(`/api/schedule/${blockId}/skip`);
+    return response.data;
+  },
+
+  // Smart reschedule (later today, tomorrow, or custom time)
+  rescheduleBlock: async (blockId: string, option: 'later_today' | 'tomorrow' | 'custom', customTime?: string): Promise<{ success: boolean; block: ScheduleBlock; new_time: string; message: string }> => {
+    const response = await api.patch(`/api/schedule/${blockId}/reschedule-smart`, { option, custom_time: customTime });
+    return response.data;
+  },
+
+  // NEW Phase 2: Push block to next week (affects deadline)
+  pushToNextWeek: async (blockId: string): Promise<{ success: boolean; new_date: string; deadline_impact: string | null; message: string }> => {
+    const response = await api.patch(`/api/schedule/${blockId}/push-to-next-week`);
+    return response.data;
+  },
+
+  // NEW Phase 2: Complete block early (can pull deadline forward)
+  completeEarly: async (blockId: string, notes: string): Promise<{ success: boolean; block: ScheduleBlock; deadline_impact: string | null; message: string }> => {
+    const response = await api.patch(`/api/schedule/${blockId}/complete-early`, { notes });
+    return response.data;
+  },
 };
+
+// ============================================================
+// AVAILABILITY API
+// ============================================================
 
 export const availabilityAPI = {
   extract: async (userId: string, text: string): Promise<any> => {
@@ -310,6 +450,11 @@ export const availabilityAPI = {
   },
   checkFeasibility: async (userId: string): Promise<any> => {
     const response = await api.get('/api/availability/feasibility', { params: { user_id: userId } });
+    return response.data;
+  },
+  // Alias for save (for consistency)
+  update: async (userId: string, availability: any): Promise<any> => {
+    const response = await api.post('/api/availability', { user_id: userId, ...availability });
     return response.data;
   },
 };

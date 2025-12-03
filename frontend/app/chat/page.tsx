@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { chatAPI } from '@/lib/api';
-import { useUserStore } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
 import { Message } from '@/types';
 import { Send, Sparkles } from 'lucide-react';
 
@@ -17,7 +17,8 @@ export default function ChatPage() {
       timestamp: new Date(),
     }
   ]);
-  const userId = useUserStore((state) => state.userId);
+  const { user } = useAuth();
+  const userId = user?.id || '';
   const queryClient = useQueryClient();
 
   const sendMessageMutation = useMutation({

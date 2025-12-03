@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { scheduleAPI, availabilityAPI, goalsAPI } from '@/lib/api';
-import { useUserStore } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
 import {
   format,
   startOfMonth,
@@ -29,7 +29,8 @@ import MonthCalendar from '@/components/schedule/MonthCalendar';
 import YearTimeline from '@/components/schedule/YearTimeline';
 
 export default function SchedulePage() {
-  const userId = useUserStore((state) => state.userId);
+  const { user } = useAuth();
+  const userId = user?.id || '';
   const queryClient = useQueryClient();
   
   // View state

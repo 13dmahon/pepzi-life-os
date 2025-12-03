@@ -35,13 +35,75 @@ function fromMinutes(totalMinutes: number): { hours: number; minutes: number } {
 }
 
 /**
+ * Calculate goal progress and return status message
+ */
+async function calculateGoalProgress(goalId: string): Promise<{ message: string; daysAhead: number } | null> {
+  try {
+    // Get goal details
+    const { data: goal } = await supabase
+      .from('goals')
+      .select('*, plan')
+      .eq('id', goalId)
+      .single();
+
+    if (!goal) return null;
+
+    // Get all completed blocks for this goal
+    const { data: completed } = await supabase
+      .from('schedule_blocks')
+      .select('duration_mins, completed_at')
+      .eq('goal_id', goalId)
+      .eq('status', 'completed');
+
+    // Get all remaining scheduled blocks
+    const { data: remaining } = await supabase
+      .from('schedule_blocks')
+      .select('scheduled_start')
+      .eq('goal_id', goalId)
+      .eq('status', 'scheduled')
+      .gt('scheduled_start', new Date().toISOString());
+
+    const totalCompleted = completed?.length || 0;
+    const totalRemaining = remaining?.length || 0;
+    const totalHoursLogged = (completed || []).reduce((sum, b) => sum + (b.duration_mins || 0), 0) / 60;
+    const targetHours = goal.plan?.total_estimated_hours || 50;
+
+    // Calculate if ahead or behind
+    const percentComplete = Math.round((totalHoursLogged / targetHours) * 100);
+    
+    // Estimate days ahead/behind based on progress vs expected
+    const totalWeeks = goal.plan?.total_weeks || 12;
+    const startDate = new Date(goal.created_at);
+    const now = new Date();
+    const weeksSinceStart = Math.max(1, Math.floor((now.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000)));
+    const expectedPercent = Math.min(100, Math.round((weeksSinceStart / totalWeeks) * 100));
+
+    const daysAhead = Math.round((percentComplete - expectedPercent) * totalWeeks * 7 / 100);
+
+    let message = '';
+    if (daysAhead > 0) {
+      message = `You're ${daysAhead} day${daysAhead > 1 ? 's' : ''} ahead! 🔥`;
+    } else if (daysAhead < 0) {
+      message = `${Math.abs(daysAhead)} day${Math.abs(daysAhead) > 1 ? 's' : ''} behind - keep pushing! 💪`;
+    } else {
+      message = `Right on track! ✅`;
+    }
+
+    return { message, daysAhead };
+  } catch (error) {
+    console.error('Error calculating progress:', error);
+    return null;
+  }
+}
+
+/**
  * Get available time slots for a day
  * Now handles weekends properly (all day is free if no work)
  */
 function getAvailableSlots(
   dayName: string,
   availability: any,
-  userBlocksForDay: Array<{ start: number; end: number }> = [] // 🆕 Blocks from calendar
+  userBlocksForDay: Array<{ start: number; end: number }> = []
 ): Array<{ start: number; end: number }> {
   const slots: Array<{ start: number; end: number }> = [];
 
@@ -87,7 +149,7 @@ function getAvailableSlots(
     }));
   blocked.push(...fixedCommitments);
 
-  // 3. 🆕 User-created blocks from calendar (work, commute, events added via UI)
+  // 3. User-created blocks from calendar (work, commute, events added via UI)
   blocked.push(...userBlocksForDay);
 
   // Sort blocked times
@@ -126,10 +188,7 @@ function getAvailableSlots(
 }
 
 /**
- * 🆕 IMPROVED: Find best available slot with VARIED start times
- * - Spreads sessions across the day (not all at same time)
- * - Considers user preference (morning/afternoon/evening)
- * - Uses offset to vary start times
+ * Find best available slot with VARIED start times
  */
 function findBestSlot(
   availableSlots: Array<{ start: number; end: number }>,
@@ -137,38 +196,31 @@ function findBestSlot(
   duration: number,
   preference: 'morning' | 'afternoon' | 'evening' | 'any',
   goalId: string,
-  sessionIndex: number = 0 // 🆕 Used to vary start times
+  sessionIndex: number = 0
 ): { start: number; end: number } | null {
-  const BUFFER = 15; // 15 min buffer between sessions
+  const BUFFER = 15;
   
-  // 🆕 Offset based on session index - spreads sessions across different times
-  const TIME_OFFSETS = [0, 45, 90, 30, 75, 15, 60, 105]; // minutes
+  const TIME_OFFSETS = [0, 45, 90, 30, 75, 15, 60, 105];
   const offset = TIME_OFFSETS[sessionIndex % TIME_OFFSETS.length];
 
-  // Define time ranges
   const timeRanges = {
-    morning: { start: 5 * 60, end: 12 * 60 }, // 5am - 12pm
-    afternoon: { start: 12 * 60, end: 17 * 60 }, // 12pm - 5pm
-    evening: { start: 17 * 60, end: 23 * 60 }, // 5pm - 11pm
+    morning: { start: 5 * 60, end: 12 * 60 },
+    afternoon: { start: 12 * 60, end: 17 * 60 },
+    evening: { start: 17 * 60, end: 23 * 60 },
   };
 
-  // For each available slot, find sub-slots that aren't already scheduled
   const candidateSlots: Array<{ start: number; end: number; score: number }> = [];
 
   for (const availSlot of availableSlots) {
-    // Get scheduled items within this available slot
     const scheduledInSlot = scheduledSlots
       .filter((s) => s.start < availSlot.end && s.end > availSlot.start)
       .sort((a, b) => a.start - b.start);
 
-    // Find gaps
     let searchStart = availSlot.start;
 
     for (const scheduled of scheduledInSlot) {
-      // Gap before this scheduled item
       const gapEnd = scheduled.start - BUFFER;
       if (gapEnd - searchStart >= duration) {
-        // 🆕 Apply offset to vary start times
         const adjustedStart = Math.min(searchStart + offset, gapEnd - duration);
         candidateSlots.push({
           start: Math.max(searchStart, adjustedStart),
@@ -179,9 +231,7 @@ function findBestSlot(
       searchStart = Math.max(searchStart, scheduled.end + BUFFER);
     }
 
-    // Gap after all scheduled items
     if (availSlot.end - searchStart >= duration) {
-      // 🆕 Apply offset to vary start times
       const maxStart = availSlot.end - duration;
       const adjustedStart = Math.min(searchStart + offset, maxStart);
       candidateSlots.push({
@@ -194,9 +244,7 @@ function findBestSlot(
 
   if (candidateSlots.length === 0) return null;
 
-  // Score candidates based on preference
   for (const candidate of candidateSlots) {
-    // Preference score
     if (preference !== 'any') {
       const range = timeRanges[preference];
       if (candidate.start >= range.start && candidate.start < range.end) {
@@ -204,12 +252,10 @@ function findBestSlot(
       }
     }
 
-    // 🆕 Penalize very early morning times (before 7am) unless preferred
     if (candidate.start < 7 * 60 && preference !== 'morning') {
       candidate.score -= 50;
     }
 
-    // 🆕 Slight preference for round start times (on the hour or half hour)
     const startMins = candidate.start % 60;
     if (startMins === 0 || startMins === 30) {
       candidate.score += 10;
@@ -218,20 +264,17 @@ function findBestSlot(
     }
   }
 
-  // Sort by score (highest first)
   candidateSlots.sort((a, b) => b.score - a.score);
 
   return { start: candidateSlots[0].start, end: candidateSlots[0].end };
 }
 
 /**
- * 🆕 IMPROVED: Smart scheduling with better spreading and user block support
- * Now reads actual training plan sessions with their specific durations and names!
- * Also reads user blocks from calendar (work, commute, events) instead of requiring availability modal
+ * Smart scheduling with better spreading and user block support
  */
 function generateSmartSchedule(
   goals: any[],
-  availability: any, // Can be null - will use defaults
+  availability: any,
   startOfWeek: Date,
   existingUserBlocks: any[] = []
 ): { blocks: any[]; warning: string | null } {
@@ -239,13 +282,11 @@ function generateSmartSchedule(
   const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   let warning: string | null = null;
 
-  // Track scheduled slots per day (training sessions we're creating)
   const scheduledByDay: Record<string, Array<{ start: number; end: number; goalId: string }>> = {};
   DAYS.forEach((day) => {
     scheduledByDay[day] = [];
   });
 
-  // 🆕 Group user blocks by day (work, commute, events from calendar UI)
   const userBlocksByDay: Record<string, Array<{ start: number; end: number }>> = {};
   DAYS.forEach((day) => {
     userBlocksByDay[day] = [];
@@ -264,7 +305,6 @@ function generateSmartSchedule(
       end: endMins,
     });
     
-    // Also add to scheduledByDay so training doesn't overlap
     scheduledByDay[dayName].push({
       start: startMins,
       end: endMins,
@@ -279,16 +319,14 @@ function generateSmartSchedule(
     }
   });
 
-  // 🆕 Calculate current week number (weeks since goal creation)
   const getGoalWeekNumber = (goal: any): number => {
     const createdAt = new Date(goal.created_at || new Date());
     const weeksSinceCreation = Math.floor(
       (startOfWeek.getTime() - createdAt.getTime()) / (7 * 24 * 60 * 60 * 1000)
     );
-    return Math.max(1, weeksSinceCreation + 1); // Week 1 is first week
+    return Math.max(1, weeksSinceCreation + 1);
   };
 
-  // 🆕 Extract specific sessions from training plan for current week
   interface PlannedSession {
     goalId: string;
     oderId: string;
@@ -309,19 +347,14 @@ function generateSmartSchedule(
     .forEach((goal) => {
       const currentWeek = getGoalWeekNumber(goal);
       
-      // 🔧 FIX: Check multiple possible locations for weekly sessions
-      // Structure can be: weekly_plan.weeks[] OR weekly_plans[]
       const weeklyPlans = goal.plan?.weekly_plan?.weeks || goal.plan?.weekly_plans || [];
       
-      // Find the plan for current week (or fallback to week 1, or last available week)
       let weekPlan = weeklyPlans.find((wp: any) => wp.week === currentWeek);
       if (!weekPlan && weeklyPlans.length > 0) {
-        // If current week doesn't exist, use modulo to cycle through available weeks
         const weekIndex = (currentWeek - 1) % weeklyPlans.length;
         weekPlan = weeklyPlans[weekIndex];
       }
 
-      // Determine preferred time based on category
       let preferredTime: 'morning' | 'afternoon' | 'evening' | 'any' = 'any';
       if (goal.category === 'fitness' || goal.category === 'climbing') {
         preferredTime = availability.preferred_workout_time || 'morning';
@@ -332,7 +365,6 @@ function generateSmartSchedule(
       }
 
       if (weekPlan && weekPlan.sessions && weekPlan.sessions.length > 0) {
-        // 🎯 Use specific sessions from the training plan!
         console.log(`   📋 ${goal.name} Week ${currentWeek}: ${weekPlan.sessions.length} specific sessions`);
         
         weekPlan.sessions.forEach((session: any) => {
@@ -343,14 +375,13 @@ function generateSmartSchedule(
             category: goal.category,
             sessionName: session.name || session.title || 'Training Session',
             sessionDuration: session.duration_mins || session.duration || 60,
-            sessionDescription: session.description || session.focus || '', // Full description
-            sessionTip: session.notes || session.tip || session.coach_tip || '', // Coach tip
+            sessionDescription: session.description || session.focus || '',
+            sessionTip: session.notes || session.tip || session.coach_tip || '',
             preferredTime,
             scheduled: false,
           });
         });
       } else {
-        // Fallback: No specific sessions, create generic ones based on weekly_hours
         const weeklyHours = goal.plan?.weekly_hours || 5;
         const sessionsPerWeek = goal.plan?.sessions_per_week || Math.ceil(weeklyHours);
         const sessionDuration = Math.round((weeklyHours * 60) / sessionsPerWeek);
@@ -364,7 +395,7 @@ function generateSmartSchedule(
             goalName: goal.name,
             category: goal.category,
             sessionName: `${goal.name} - Session ${i + 1}`,
-            sessionDuration: Math.min(Math.max(sessionDuration, 15), 120), // 15-120 min
+            sessionDuration: Math.min(Math.max(sessionDuration, 15), 120),
             preferredTime,
             scheduled: false,
           });
@@ -372,7 +403,6 @@ function generateSmartSchedule(
       }
     });
 
-  // Sort by duration (longer sessions first - easier to fit)
   plannedSessions.sort((a, b) => b.sessionDuration - a.sessionDuration);
 
   console.log(`\n📊 Sessions to schedule: ${plannedSessions.length} total`);
@@ -380,13 +410,11 @@ function generateSmartSchedule(
     console.log(`   ${ps.goalName}: "${ps.sessionName}" (${ps.sessionDuration}min) [${ps.preferredTime}]`);
   });
 
-  // Get available slots for each day (now includes user blocks from calendar!)
   const availableByDay: Record<string, Array<{ start: number; end: number }>> = {};
   DAYS.forEach((day) => {
     availableByDay[day] = getAvailableSlots(day, availability, userBlocksByDay[day]);
   });
 
-  // Debug: Show available time per day
   console.log(`\n📅 Available time per day:`);
   let totalAvailableMins = 0;
   DAYS.forEach((day) => {
@@ -396,18 +424,14 @@ function generateSmartSchedule(
     console.log(`   ${day}: ${hours}h free`);
   });
 
-  // Calculate total needed vs available
   const totalNeededMins = plannedSessions.reduce((sum, ps) => sum + ps.sessionDuration, 0);
   if (totalNeededMins > totalAvailableMins * 0.8) {
     warning = `You need ${Math.round(totalNeededMins / 60)}h/week for all goals, but only have ~${Math.round(totalAvailableMins / 60)}h available. Some sessions may not fit.`;
     console.log(`\n⚠️ ${warning}`);
   }
 
-  // 🆕 Schedule each specific session
   let globalSessionIndex = 0;
   
-  // Distribute sessions across days more evenly
-  // Group by goal first, then round-robin across days
   const sessionsByGoal: Record<string, PlannedSession[]> = {};
   plannedSessions.forEach((ps) => {
     if (!sessionsByGoal[ps.goalId]) sessionsByGoal[ps.goalId] = [];
@@ -420,7 +444,6 @@ function generateSmartSchedule(
   while (round < MAX_ROUNDS) {
     let anyScheduledThisRound = false;
 
-    // Shuffle day order each round to avoid always starting with Sunday
     const dayOrder = [...DAYS];
     if (round > 0) {
       const rotateBy = round % 7;
@@ -429,20 +452,17 @@ function generateSmartSchedule(
       }
     }
 
-    // Go through each day
     for (const dayName of dayOrder) {
       const dayIndex = DAYS.indexOf(dayName);
       const currentDay = new Date(startOfWeek);
       currentDay.setDate(startOfWeek.getDate() + dayIndex);
 
-      // Try to schedule one session per goal per day (round-robin)
       for (const goalId of Object.keys(sessionsByGoal)) {
         const goalSessions = sessionsByGoal[goalId];
         const nextSession = goalSessions.find((s) => !s.scheduled);
         
-        if (!nextSession) continue; // All sessions for this goal scheduled
+        if (!nextSession) continue;
 
-        // Limit sessions per day per goal
         const sessionsThisDayForGoal = scheduledByDay[dayName].filter(
           (s) => s.goalId === goalId
         ).length;
@@ -450,7 +470,6 @@ function generateSmartSchedule(
         const maxPerDay = Math.max(Math.ceil(goalSessions.length / 5), 2);
         if (sessionsThisDayForGoal >= maxPerDay) continue;
 
-        // Find a slot for this specific session
         const slot = findBestSlot(
           availableByDay[dayName],
           scheduledByDay[dayName],
@@ -461,13 +480,10 @@ function generateSmartSchedule(
         );
 
         if (slot) {
-          // Create the scheduled time
           const scheduledTime = new Date(currentDay);
           const { hours, minutes } = fromMinutes(slot.start);
           scheduledTime.setHours(hours, minutes, 0, 0);
 
-          // Add the block with the SPECIFIC session name, description, and tip!
-          // Format: name|||description|||tip (can be parsed by frontend)
           const notesData = [
             nextSession.sessionName,
             nextSession.sessionDescription || '',
@@ -479,14 +495,13 @@ function generateSmartSchedule(
             goal_id: nextSession.goalId,
             type: nextSession.category === 'fitness' || nextSession.category === 'climbing' ? 'workout' : 'training',
             scheduled_start: scheduledTime.toISOString(),
-            duration_mins: nextSession.sessionDuration, // 🎯 Actual duration from plan!
+            duration_mins: nextSession.sessionDuration,
             status: 'scheduled',
-            notes: notesData, // 🎯 Contains name, description, and tip!
+            notes: notesData,
             created_by: 'auto',
             flexibility: 'movable',
           });
 
-          // Mark slot as used
           scheduledByDay[dayName].push({
             start: slot.start,
             end: slot.end,
@@ -502,7 +517,6 @@ function generateSmartSchedule(
 
     round++;
 
-    // Check if all sessions are scheduled
     const allDone = plannedSessions.every((ps) => ps.scheduled);
 
     if (allDone) {
@@ -513,7 +527,6 @@ function generateSmartSchedule(
     if (!anyScheduledThisRound) {
       console.log(`\n⚠️ No more slots available after ${round} rounds`);
       
-      // Generate specific warning about which sessions couldn't fit
       const unscheduled = plannedSessions.filter((ps) => !ps.scheduled);
       if (unscheduled.length > 0) {
         const details = unscheduled.slice(0, 3).map((ps) => 
@@ -526,7 +539,6 @@ function generateSmartSchedule(
     }
   }
 
-  // Log results
   const scheduledCount = plannedSessions.filter((ps) => ps.scheduled).length;
   const totalHours = Math.round(blocks.reduce((sum, b) => sum + b.duration_mins, 0) / 60);
   console.log(`\n✅ Generated ${blocks.length} sessions (${totalHours}h total)`);
@@ -685,8 +697,161 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 /**
- * 🆕 Generate schedule for a SINGLE GOAL for its ENTIRE DURATION
- * Called automatically when a training plan is created
+ * POST /api/schedule/recurring
+ * Create recurring blocks across multiple days for the entire calendar
+ */
+router.post('/recurring', async (req: Request, res: Response) => {
+  try {
+    const { user_id, type, days, start_time, end_time, notes } = req.body;
+
+    if (!user_id || !type || !days || !Array.isArray(days) || days.length === 0 || !start_time || !end_time) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['user_id', 'type', 'days (array)', 'start_time', 'end_time'],
+        example: {
+          user_id: 'uuid',
+          type: 'work',
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          start_time: '09:00',
+          end_time: '18:00',
+          notes: 'Office work'
+        }
+      });
+    }
+
+    const [startHours, startMins] = start_time.split(':').map(Number);
+    const [endHours, endMins] = end_time.split(':').map(Number);
+    const durationMins = (endHours * 60 + endMins) - (startHours * 60 + startMins);
+
+    if (durationMins <= 0) {
+      return res.status(400).json({ error: 'End time must be after start time' });
+    }
+
+    console.log(`\n📅 ========== CREATING RECURRING BLOCKS ==========`);
+    console.log(`👤 User: ${user_id}`);
+    console.log(`📋 Type: ${type}`);
+    console.log(`📆 Days: ${days.join(', ')}`);
+    console.log(`⏰ Time: ${start_time} - ${end_time} (${durationMins} mins)`);
+
+    const { data: goals } = await supabase
+      .from('goals')
+      .select('target_date')
+      .eq('user_id', user_id)
+      .eq('status', 'active')
+      .not('target_date', 'is', null)
+      .order('target_date', { ascending: false })
+      .limit(1);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    let scheduleEndDate: Date;
+    if (goals && goals.length > 0 && goals[0].target_date) {
+      scheduleEndDate = new Date(goals[0].target_date);
+      scheduleEndDate.setDate(scheduleEndDate.getDate() + 7);
+    } else {
+      scheduleEndDate = new Date(today);
+      scheduleEndDate.setDate(scheduleEndDate.getDate() + 12 * 7);
+    }
+
+    console.log(`📆 Scheduling from ${today.toDateString()} to ${scheduleEndDate.toDateString()}`);
+
+    const DAYS_MAP: Record<string, number> = {
+      'sunday': 0,
+      'monday': 1,
+      'tuesday': 2,
+      'wednesday': 3,
+      'thursday': 4,
+      'friday': 5,
+      'saturday': 6,
+    };
+
+    const targetDayIndices = days
+      .map((d: string) => DAYS_MAP[d.toLowerCase()])
+      .filter((d: number | undefined) => d !== undefined);
+
+    if (targetDayIndices.length === 0) {
+      return res.status(400).json({ error: 'Invalid day names provided' });
+    }
+
+    const blocksToCreate: any[] = [];
+    const currentDate = new Date(today);
+
+    while (currentDate <= scheduleEndDate) {
+      const dayIndex = currentDate.getDay();
+      
+      if (targetDayIndices.includes(dayIndex)) {
+        const scheduledStart = new Date(currentDate);
+        scheduledStart.setHours(startHours, startMins, 0, 0);
+
+        blocksToCreate.push({
+          user_id,
+          goal_id: null,
+          type,
+          scheduled_start: scheduledStart.toISOString(),
+          duration_mins: durationMins,
+          notes: notes || null,
+          flexibility: 'fixed',
+          created_by: 'user',
+          status: 'scheduled',
+        });
+      }
+
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    console.log(`📦 Creating ${blocksToCreate.length} blocks...`);
+
+    for (const block of blocksToCreate) {
+      await supabase
+        .from('schedule_blocks')
+        .delete()
+        .eq('user_id', user_id)
+        .eq('type', type)
+        .eq('scheduled_start', block.scheduled_start)
+        .eq('created_by', 'user');
+    }
+
+    const BATCH_SIZE = 100;
+    let insertedCount = 0;
+
+    for (let i = 0; i < blocksToCreate.length; i += BATCH_SIZE) {
+      const batch = blocksToCreate.slice(i, i + BATCH_SIZE);
+      const { error: insertError } = await supabase
+        .from('schedule_blocks')
+        .insert(batch);
+
+      if (insertError) {
+        console.error('Batch insert error:', insertError);
+        throw insertError;
+      }
+      insertedCount += batch.length;
+    }
+
+    console.log(`✅ Created ${insertedCount} recurring blocks`);
+
+    return res.json({
+      success: true,
+      blocksCreated: insertedCount,
+      type,
+      days,
+      time: `${start_time} - ${end_time}`,
+      duration_mins: durationMins,
+      schedule_until: scheduleEndDate.toISOString().split('T')[0],
+      message: `Created ${insertedCount} ${type} blocks for ${days.join(', ')} from ${start_time} to ${end_time}`,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Recurring block creation error:', error);
+    return res.status(500).json({
+      error: 'Failed to create recurring blocks',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * Generate schedule for a SINGLE GOAL for its ENTIRE DURATION
  */
 async function generateFullGoalSchedule(
   goal: any,
@@ -705,7 +870,6 @@ async function generateFullGoalSchedule(
     return { blocksCreated: 0, warning: 'No valid training plan' };
   }
 
-  // Calculate duration
   const startDate = new Date();
   startDate.setHours(0, 0, 0, 0);
   
@@ -713,7 +877,6 @@ async function generateFullGoalSchedule(
   if (goal.target_date) {
     endDate = new Date(goal.target_date);
   } else {
-    // Default to total_weeks from plan
     const totalWeeks = plan.total_weeks || Math.ceil((plan.total_estimated_hours || 50) / plan.weekly_hours);
     endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + totalWeeks * 7);
@@ -722,7 +885,6 @@ async function generateFullGoalSchedule(
   const totalWeeks = Math.ceil((endDate.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
   console.log(`📆 Duration: ${totalWeeks} weeks (${startDate.toDateString()} → ${endDate.toDateString()})`);
 
-  // Get user availability
   const { data: availability } = await supabase
     .from('user_availability')
     .select('*')
@@ -738,7 +900,6 @@ async function generateFullGoalSchedule(
     preferred_workout_time: preferredTime,
   };
 
-  // Get ALL existing user-created blocks for the entire period
   const { data: existingUserBlocks } = await supabase
     .from('schedule_blocks')
     .select('*')
@@ -749,7 +910,6 @@ async function generateFullGoalSchedule(
 
   console.log(`📦 Existing blocks to schedule around: ${existingUserBlocks?.length || 0}`);
 
-  // Delete any existing auto-generated blocks for THIS GOAL
   await supabase
     .from('schedule_blocks')
     .delete()
@@ -757,7 +917,6 @@ async function generateFullGoalSchedule(
     .eq('goal_id', goal.id)
     .eq('created_by', 'auto');
 
-  // Build sessions from the weekly plan
   const weeklyPlan = plan.weekly_plan;
   const allBlocks: any[] = [];
   let warning: string | null = null;
@@ -765,23 +924,18 @@ async function generateFullGoalSchedule(
   const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const sessionsPerWeek = plan.sessions_per_week || 3;
 
-  // For each week in the goal duration
   for (let weekNum = 0; weekNum < totalWeeks; weekNum++) {
     const weekStart = new Date(startDate);
     weekStart.setDate(startDate.getDate() + weekNum * 7);
 
-    // Get sessions for this specific week from the plan (if detailed weeks exist)
     let weekSessions: any[] = [];
     
     if (weeklyPlan?.weeks && weeklyPlan.weeks[weekNum]) {
-      // Use the detailed week plan
       weekSessions = weeklyPlan.weeks[weekNum].sessions || [];
     } else if (weeklyPlan?.weeks && weeklyPlan.weeks.length > 0) {
-      // Cycle through available weeks
       const cycleIndex = weekNum % weeklyPlan.weeks.length;
       weekSessions = weeklyPlan.weeks[cycleIndex]?.sessions || [];
     } else {
-      // Fallback: create generic sessions
       const sessionDuration = Math.round((plan.weekly_hours * 60) / sessionsPerWeek);
       for (let i = 0; i < sessionsPerWeek; i++) {
         weekSessions.push({
@@ -792,10 +946,8 @@ async function generateFullGoalSchedule(
       }
     }
 
-    // Track what's been scheduled this week
     const scheduledThisWeek: Array<{ day: string; start: number; end: number }> = [];
 
-    // Group existing blocks by day for this week
     const userBlocksByDay: Record<string, Array<{ start: number; end: number }>> = {};
     DAYS.forEach(day => { userBlocksByDay[day] = []; });
 
@@ -815,13 +967,11 @@ async function generateFullGoalSchedule(
       }
     });
 
-    // Schedule each session on preferred days first
     let sessionIndex = 0;
     for (const session of weekSessions) {
       const duration = session.duration_mins || 60;
       let scheduled = false;
 
-      // Try preferred days first
       for (const dayName of preferredDays) {
         if (scheduled) break;
         
@@ -831,20 +981,15 @@ async function generateFullGoalSchedule(
         const dayDate = new Date(weekStart);
         dayDate.setDate(weekStart.getDate() + dayIndex);
 
-        // Skip if in the past
         if (dayDate < new Date()) continue;
 
-        // Get available slots for this day
         const availSlots = getAvailableSlots(dayName, effectiveAvailability, userBlocksByDay[dayName]);
 
-        // Find a slot that doesn't conflict with already-scheduled sessions this week
         for (const slot of availSlots) {
           if (scheduled) break;
           
-          // Check slot size
           if (slot.end - slot.start < duration) continue;
 
-          // Check for conflicts with sessions we've already scheduled today
           const todayScheduled = scheduledThisWeek.filter(s => s.day === dayName);
           let hasConflict = false;
 
@@ -859,7 +1004,6 @@ async function generateFullGoalSchedule(
           }
 
           if (!hasConflict) {
-            // Create the block
             const scheduledTime = new Date(dayDate);
             scheduledTime.setHours(Math.floor(candidateStart / 60), candidateStart % 60, 0, 0);
 
@@ -881,11 +1025,10 @@ async function generateFullGoalSchedule(
         }
       }
 
-      // If not scheduled on preferred days, try any day
       if (!scheduled) {
         for (const dayName of DAYS) {
           if (scheduled) break;
-          if (preferredDays.map(d => d.toLowerCase()).includes(dayName)) continue; // Already tried
+          if (preferredDays.map(d => d.toLowerCase()).includes(dayName)) continue;
 
           const dayIndex = DAYS.indexOf(dayName);
           const dayDate = new Date(weekStart);
@@ -942,9 +1085,7 @@ async function generateFullGoalSchedule(
     }
   }
 
-  // Insert all blocks
   if (allBlocks.length > 0) {
-    // Batch insert (Supabase handles large inserts well, but let's chunk for safety)
     const BATCH_SIZE = 100;
     for (let i = 0; i < allBlocks.length; i += BATCH_SIZE) {
       const batch = allBlocks.slice(i, i + BATCH_SIZE);
@@ -966,7 +1107,7 @@ async function generateFullGoalSchedule(
 
 /**
  * POST /api/schedule/generate-for-goal
- * Generate full schedule for a specific goal (called after plan creation)
+ * Generate full schedule for a specific goal
  */
 router.post('/generate-for-goal', async (req: Request, res: Response) => {
   try {
@@ -976,7 +1117,6 @@ router.post('/generate-for-goal', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing user_id or goal_id' });
     }
 
-    // Get the goal
     const { data: goal, error: goalError } = await supabase
       .from('goals')
       .select('*')
@@ -1012,7 +1152,6 @@ router.post('/generate-for-goal', async (req: Request, res: Response) => {
 /**
  * POST /api/schedule/auto-generate
  * Auto-generate weekly schedule based on goals and availability
- * 🆕 Now returns warnings if sessions don't fit
  */
 router.post('/auto-generate', async (req: Request, res: Response) => {
   try {
@@ -1025,7 +1164,6 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
     console.log(`\n🤖 ========== AUTO-GENERATE SCHEDULE ==========`);
     console.log(`🤖 User: ${user_id}`);
 
-    // 1. Get user's active goals with plans
     const { data: goals, error: goalsError } = await supabase
       .from('goals')
       .select('*')
@@ -1034,7 +1172,6 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
 
     if (goalsError) throw goalsError;
 
-    // Filter to goals with weekly_hours > 0
     const goalsWithPlans = (goals || []).filter(
       (g) => g.plan && g.plan.weekly_hours && g.plan.weekly_hours > 0
     );
@@ -1049,18 +1186,16 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
       });
     }
 
-    // 2. Get user availability (optional - will use defaults if not set)
     const { data: availability } = await supabase
       .from('user_availability')
       .select('*')
       .eq('user_id', user_id)
       .single();
 
-    // If no availability set, use sensible defaults
     const effectiveAvailability = availability || {
       wake_time: '06:00',
       sleep_time: '22:00',
-      work_schedule: {}, // No work blocked = all day free
+      work_schedule: {},
       fixed_commitments: [],
       daily_commute_mins: 0,
       preferred_workout_time: 'morning',
@@ -1068,7 +1203,6 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
 
     console.log(`📅 Availability: ${availability ? 'Custom set' : 'Using defaults (6am-10pm)'}`);
 
-    // 3. Calculate week boundaries
     const today = new Date();
     const startOfWeek = new Date(today);
     startOfWeek.setDate(today.getDate() - today.getDay());
@@ -1077,8 +1211,6 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
     const endOfWeek = new Date(startOfWeek);
     endOfWeek.setDate(startOfWeek.getDate() + 7);
 
-    // 4. 🆕 Get existing USER-CREATED blocks (work, commute, events from calendar)
-    // These are blocks the user added via "Add Block" or are type work/commute/event
     const { data: existingUserBlocks } = await supabase
       .from('schedule_blocks')
       .select('*')
@@ -1089,7 +1221,6 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
 
     console.log(`📦 Existing user blocks to schedule around: ${existingUserBlocks?.length || 0}`);
 
-    // 5. Clear only AUTO-GENERATED schedule for this week
     await supabase
       .from('schedule_blocks')
       .delete()
@@ -1098,7 +1229,6 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
       .gte('scheduled_start', startOfWeek.toISOString())
       .lt('scheduled_start', endOfWeek.toISOString());
 
-    // 6. Generate schedule (passing user blocks to avoid conflicts)
     const { blocks: schedule, warning } = generateSmartSchedule(
       goalsWithPlans, 
       effectiveAvailability, 
@@ -1106,7 +1236,6 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
       existingUserBlocks || []
     );
 
-    // 7. Insert generated blocks
     if (schedule.length > 0) {
       const { error: insertError } = await supabase
         .from('schedule_blocks')
@@ -1121,7 +1250,7 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       schedule,
-      warning, // 🆕 Include warning in response
+      warning,
       stats: {
         sessions: schedule.length,
         totalHours,
@@ -1137,6 +1266,387 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
     });
   }
 });
+
+// ============================================================
+// NEW ENDPOINTS - Complete with notes, Skip, Smart Reschedule
+// ============================================================
+
+/**
+ * PATCH /api/schedule/:id/complete-with-notes
+ * Complete a block with just notes (simplified - no metrics)
+ */
+router.patch('/:id/complete-with-notes', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+
+    console.log(`✅ Completing block ${id} with notes`);
+
+    const { data: block, error } = await supabase
+      .from('schedule_blocks')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        notes: notes || null,
+      })
+      .eq('id', id)
+      .select(`
+        *,
+        goals (id, name, category, plan, target_date)
+      `)
+      .single();
+
+    if (error) throw error;
+
+    let progressMessage = null;
+    if (block.goal_id) {
+      const progress = await calculateGoalProgress(block.goal_id);
+      if (progress) {
+        progressMessage = progress.message;
+      }
+    }
+
+    return res.json({
+      success: true,
+      block,
+      message: progressMessage || 'Session logged!',
+    });
+
+  } catch (error: any) {
+    console.error('❌ Complete with notes error:', error);
+    return res.status(500).json({
+      error: 'Failed to complete block',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * PATCH /api/schedule/:id/skip
+ * Skip a block - marks as skipped, calculates deadline impact
+ */
+router.patch('/:id/skip', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    console.log(`⏭️ Skipping block ${id}`);
+
+    const { data: block, error: fetchError } = await supabase
+      .from('schedule_blocks')
+      .select(`
+        *,
+        goals (id, name, target_date, plan)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !block) {
+      return res.status(404).json({ error: 'Block not found' });
+    }
+
+    const { error: updateError } = await supabase
+      .from('schedule_blocks')
+      .update({
+        status: 'skipped',
+      })
+      .eq('id', id);
+
+    if (updateError) throw updateError;
+
+    let deadlineImpact = null;
+    if (block.goal_id && block.goals?.target_date) {
+      const scheduledDate = new Date(block.scheduled_start);
+      const today = new Date();
+      const daysDiff = Math.floor((scheduledDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (daysDiff > 7) {
+        const sessionsPerWeek = block.goals.plan?.sessions_per_week || 3;
+        const daysImpact = Math.ceil(7 / sessionsPerWeek);
+        
+        deadlineImpact = `Goal pushed back ~${daysImpact} days.`;
+        
+        const currentTarget = new Date(block.goals.target_date);
+        currentTarget.setDate(currentTarget.getDate() + daysImpact);
+        
+        await supabase
+          .from('goals')
+          .update({ target_date: currentTarget.toISOString().split('T')[0] })
+          .eq('id', block.goal_id);
+      }
+    }
+
+    return res.json({
+      success: true,
+      deadline_impact: deadlineImpact,
+      message: deadlineImpact || 'Session skipped',
+    });
+
+  } catch (error: any) {
+    console.error('❌ Skip error:', error);
+    return res.status(500).json({
+      error: 'Failed to skip block',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * PATCH /api/schedule/:id/reschedule-smart
+ * Smart reschedule - later today, tomorrow, or custom time
+ */
+router.patch('/:id/reschedule-smart', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { option, custom_time } = req.body;
+
+    console.log(`📅 Smart reschedule block ${id} to ${option}`);
+
+    const { data: block, error: fetchError } = await supabase
+      .from('schedule_blocks')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !block) {
+      return res.status(404).json({ error: 'Block not found' });
+    }
+
+    let newStart: Date;
+    const now = new Date();
+
+    if (option === 'later_today') {
+      newStart = new Date(now);
+      newStart.setHours(Math.max(now.getHours() + 2, 18), 0, 0, 0);
+      
+      if (newStart.getHours() >= 22) {
+        newStart.setDate(newStart.getDate() + 1);
+        newStart.setHours(8, 0, 0, 0);
+      }
+    } else if (option === 'tomorrow') {
+      const originalTime = new Date(block.scheduled_start);
+      newStart = new Date(now);
+      newStart.setDate(newStart.getDate() + 1);
+      newStart.setHours(originalTime.getHours(), originalTime.getMinutes(), 0, 0);
+    } else if (option === 'custom' && custom_time) {
+      newStart = new Date(custom_time);
+    } else {
+      return res.status(400).json({ error: 'Invalid reschedule option' });
+    }
+
+    const originalStart = block.original_scheduled_start || block.scheduled_start;
+
+    const { data: updated, error: updateError } = await supabase
+      .from('schedule_blocks')
+      .update({
+        scheduled_start: newStart.toISOString(),
+        original_scheduled_start: originalStart,
+        status: 'scheduled',
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    return res.json({
+      success: true,
+      block: updated,
+      new_time: newStart.toISOString(),
+      message: `Rescheduled to ${newStart.toLocaleString('en-GB', { 
+        weekday: 'short', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      })}`,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Smart reschedule error:', error);
+    return res.status(500).json({
+      error: 'Failed to reschedule block',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * PATCH /api/schedule/:id/push-to-next-week
+ * Push a session to next week - affects goal deadline
+ */
+router.patch('/:id/push-to-next-week', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    console.log(`📅 Pushing block ${id} to next week`);
+
+    const { data: block, error: fetchError } = await supabase
+      .from('schedule_blocks')
+      .select(`
+        *,
+        goals (id, name, target_date, plan)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !block) {
+      return res.status(404).json({ error: 'Block not found' });
+    }
+
+    // Calculate new date (same day next week)
+    const currentDate = new Date(block.scheduled_start);
+    const newDate = new Date(currentDate);
+    newDate.setDate(currentDate.getDate() + 7);
+
+    // Store original start if not set
+    const originalStart = block.original_scheduled_start || block.scheduled_start;
+
+    // Update the block
+    const { data: updated, error: updateError } = await supabase
+      .from('schedule_blocks')
+      .update({
+        scheduled_start: newDate.toISOString(),
+        original_scheduled_start: originalStart,
+        status: 'scheduled',
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Calculate deadline impact
+    let deadlineImpact: string | null = null;
+    if (block.goal_id && block.goals?.target_date) {
+      const sessionsPerWeek = block.goals.plan?.sessions_per_week || 3;
+      const daysImpact = Math.ceil(7 / sessionsPerWeek);
+      
+      // Update goal target date
+      const currentTarget = new Date(block.goals.target_date);
+      currentTarget.setDate(currentTarget.getDate() + daysImpact);
+      
+      await supabase
+        .from('goals')
+        .update({ target_date: currentTarget.toISOString().split('T')[0] })
+        .eq('id', block.goal_id);
+
+      deadlineImpact = `Goal deadline pushed to ${currentTarget.toLocaleDateString('en-GB', { 
+        day: 'numeric', 
+        month: 'short' 
+      })} (+${daysImpact} days)`;
+    }
+
+    return res.json({
+      success: true,
+      block: updated,
+      new_date: newDate.toISOString(),
+      deadline_impact: deadlineImpact,
+      message: `Moved to ${newDate.toLocaleDateString('en-GB', { 
+        weekday: 'short', 
+        day: 'numeric', 
+        month: 'short' 
+      })}`,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Push to next week error:', error);
+    return res.status(500).json({
+      error: 'Failed to push block',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * PATCH /api/schedule/:id/complete-early
+ * Complete a future session early - can pull deadline forward
+ */
+router.patch('/:id/complete-early', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+
+    console.log(`✅ Completing block ${id} early`);
+
+    const { data: block, error: fetchError } = await supabase
+      .from('schedule_blocks')
+      .select(`
+        *,
+        goals (id, name, target_date, plan)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !block) {
+      return res.status(404).json({ error: 'Block not found' });
+    }
+
+    // Mark as completed
+    const { data: updated, error: updateError } = await supabase
+      .from('schedule_blocks')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        notes: notes || null,
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Check if completing early - session was scheduled for the future
+    let deadlineImpact: string | null = null;
+    const scheduledDate = new Date(block.scheduled_start);
+    const now = new Date();
+    
+    if (scheduledDate > now && block.goal_id && block.goals?.target_date) {
+      // Calculate days ahead
+      const daysAhead = Math.floor((scheduledDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (daysAhead >= 1) {
+        // Pull deadline forward
+        const currentTarget = new Date(block.goals.target_date);
+        currentTarget.setDate(currentTarget.getDate() - daysAhead);
+        
+        await supabase
+          .from('goals')
+          .update({ target_date: currentTarget.toISOString().split('T')[0] })
+          .eq('id', block.goal_id);
+
+        deadlineImpact = `Completed ${daysAhead} day${daysAhead > 1 ? 's' : ''} early! Deadline pulled to ${currentTarget.toLocaleDateString('en-GB', { 
+          day: 'numeric', 
+          month: 'short' 
+        })} 🔥`;
+      }
+    }
+
+    // Calculate progress
+    let progressMessage = 'Session logged!';
+    if (block.goal_id) {
+      const progress = await calculateGoalProgress(block.goal_id);
+      if (progress) {
+        progressMessage = progress.message;
+      }
+    }
+
+    return res.json({
+      success: true,
+      block: updated,
+      deadline_impact: deadlineImpact,
+      message: deadlineImpact || progressMessage,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Complete early error:', error);
+    return res.status(500).json({
+      error: 'Failed to complete block',
+      message: error.message,
+    });
+  }
+});
+
+// ============================================================
+// EXISTING ENDPOINTS (unchanged)
+// ============================================================
 
 /**
  * PATCH /api/schedule/:id
@@ -1195,7 +1705,6 @@ router.patch('/:id/with-future', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'scheduled_start is required' });
     }
 
-    // Get the original block
     const { data: originalBlock, error: fetchError } = await supabase
       .from('schedule_blocks')
       .select('*, goals(name, category)')
@@ -1206,7 +1715,6 @@ router.patch('/:id/with-future', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Block not found' });
     }
 
-    // Update the current block
     const { data: updatedBlock, error: updateError } = await supabase
       .from('schedule_blocks')
       .update({ scheduled_start })
@@ -1218,33 +1726,28 @@ router.patch('/:id/with-future', async (req: Request, res: Response) => {
 
     let updatedCount = 1;
 
-    // If apply_to_future, update all future matching sessions
     if (apply_to_future && originalBlock.goal_id && originalBlock.notes) {
       const originalDate = new Date(originalBlock.scheduled_start);
       const newDate = new Date(scheduled_start);
       
-      // Extract session name from notes (format: "name|||description|||tip")
       const sessionName = originalBlock.notes.split('|||')[0];
       
-      // Calculate the new day of week and time
-      const newDayOfWeek = newDate.getDay(); // 0 = Sunday, 6 = Saturday
+      const newDayOfWeek = newDate.getDay();
       const newHour = newDate.getHours();
       const newMinute = newDate.getMinutes();
       
       console.log(`🔄 Applying to future sessions: "${sessionName}" -> ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][newDayOfWeek]} ${newHour}:${String(newMinute).padStart(2, '0')}`);
       
-      // Find all future blocks with same goal_id and session name
       const { data: futureBlocks, error: futureError } = await supabase
         .from('schedule_blocks')
         .select('id, scheduled_start, notes')
         .eq('goal_id', originalBlock.goal_id)
-        .gt('scheduled_start', originalBlock.scheduled_start) // Only future blocks
-        .neq('id', id) // Exclude current block
-        .eq('status', 'scheduled'); // Only scheduled, not completed
+        .gt('scheduled_start', originalBlock.scheduled_start)
+        .neq('id', id)
+        .eq('status', 'scheduled');
 
       if (futureError) throw futureError;
 
-      // Filter to only matching session names and update each
       const matchingBlocks = (futureBlocks || []).filter(block => {
         const blockSessionName = (block.notes || '').split('|||')[0];
         return blockSessionName === sessionName;
@@ -1252,17 +1755,14 @@ router.patch('/:id/with-future', async (req: Request, res: Response) => {
 
       console.log(`📦 Found ${matchingBlocks.length} future matching sessions`);
 
-      // Update each matching block
       for (const block of matchingBlocks) {
         const blockDate = new Date(block.scheduled_start);
         
-        // Calculate days difference to get to the new day of week
         const currentDayOfWeek = blockDate.getDay();
         let daysDiff = newDayOfWeek - currentDayOfWeek;
-        if (daysDiff < 0) daysDiff += 7; // Wrap around if needed
-        if (daysDiff === 0) daysDiff = 0; // Same day, no change
+        if (daysDiff < 0) daysDiff += 7;
+        if (daysDiff === 0) daysDiff = 0;
         
-        // Create new date at the same week but new day/time
         const newBlockDate = new Date(blockDate);
         newBlockDate.setDate(blockDate.getDate() + daysDiff);
         newBlockDate.setHours(newHour, newMinute, 0, 0);
@@ -1355,7 +1855,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
 /**
  * PATCH /api/schedule/:id/complete
- * Mark a block as completed
+ * Mark a block as completed (legacy - no notes)
  */
 router.patch('/:id/complete', async (req: Request, res: Response) => {
   try {

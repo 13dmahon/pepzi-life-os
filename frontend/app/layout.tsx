@@ -1,11 +1,28 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import Providers from './providers';
-import Navigation from '@/components/Navigation';
+import { AuthProvider } from '@/lib/auth-context';
+import AuthNavigation from '@/components/AuthNavigation';
 
 export const metadata: Metadata = {
   title: 'Pepzi - AI Life OS',
   description: 'Your AI-powered life operating system',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Pepzi',
+  },
+  formatDetection: {
+    telephone: false,
+  },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({
@@ -15,10 +32,17 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="font-sans antialiased">
+      <head>
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
+      </head>
+      <body className="font-sans antialiased min-h-screen bg-gray-50">
         <Providers>
-          <Navigation />
-          {children}
+          <AuthProvider>
+            <AuthNavigation />
+            {children}
+          </AuthProvider>
         </Providers>
       </body>
     </html>

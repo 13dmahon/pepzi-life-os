@@ -113,62 +113,6 @@ Mix: Vocabulary (apps) + Grammar (study) + Listening (media) + Speaking (tutors)
 - £5K MRR: 12-24 months typically for first-timers
 - Key: Consistency and iteration matter more than hours
 
-### CAREER & PROMOTIONS
-- Skill gap closure: 5-10h/week on learning, 3-6 months
-- Promotion (same company): 6-18 months, depends on review cycles
-- Job search (same field): 5-10h/week, 2-4 months typical
-- Career change: 6-24 months including retraining
-- Key questions: Manager awareness? Skill gaps? Visibility?
-
-### TRAVEL & ADVENTURES
-- Trip planning (1-week vacation): 5-15 hours total
-- Major trip planning (multi-week): 15-30 hours
-- Adventure prep (e.g., Kilimanjaro): 8-12 weeks fitness prep, 4-6h/week
-- Saving for travel: Convert £ target to weekly savings milestone
-
-### EDUCATION & CERTIFICATIONS
-- Online course completion: 10-100 hours depending on course
-- Professional certs (AWS, PMP): 50-150 hours study
-- Major certifications (CPA): 300-400 hours
-- Key: 1h/day beats 7h on weekends for retention
-
-### CREATIVE PROJECTS
-- Writing a book (first draft): 50,000-80,000 words, 100-160 days at 500 words/day
-- Learning instrument (basic songs): 50-100 hours, daily practice essential
-- Learning instrument (intermediate): 300-500 hours
-- YouTube/content: 5-20 hours per video, consistency > quality initially
-
-### FINANCIAL GOALS
-- Convert money goals to time: £10,000 savings at £500/month = 20 months
-- Track weekly/monthly milestones
-- Debt payoff: Calculate payoff date at current rate, optimize
-
-### MENTAL HEALTH & WELLBEING
-IMPORTANT: You are a coach, not a therapist. For clinical issues, always encourage professional support.
-
-Focus on HABITS that support mental health:
-- Exercise: 3-5x/week, 30+ min (strong evidence for mood)
-- Sleep: Consistent schedule, 7-9 hours
-- Mindfulness: Start with 10 min/day, build up
-- Social connection: Regular scheduled contact
-- Routine: Structure and predictability
-
-Approach: "Let's build habits that support your wellbeing. Are you working with a therapist? They should guide the overall approach - I can help you stay consistent with daily habits."
-
-If user mentions self-harm or severe symptoms: Provide crisis resources and strongly encourage professional help immediately.
-
-### SOCIAL & RELATIONSHIPS
-- Making friends: Attend 2-3 social events/week, 4-6h/week
-- Deepening relationships: Schedule quality time, 2-4h/week
-- Dating: Active effort 3-5h/week (apps, events, dates)
-- Key: Consistency over intensity, show up regularly
-
-### HEALTH (Non-Fitness)
-- Weight loss (sustainable): 0.5-1kg/week, diet is primary driver
-- Quitting smoking: Track days smoke-free, expect multiple attempts
-- Sleep improvement: Focus on consistent wake time, wind-down routine
-- Note: Medical advice from doctors, not Pepzi
-
 ### CLIMBING
 - Beginner to V3: 3-6 months, 2-3 sessions/week, focus on technique
 - V3 to V5: 6-12 months, 3 sessions/week, add fingerboard
@@ -302,8 +246,7 @@ ${goalBreakdown.join('\n')}`;
 }
 
 /**
- * 🆕 Generate preview weeks for plan review
- * Returns Week 1, midpoint week, and final week
+ * Generate preview weeks for plan review
  */
 async function generatePreviewWeeks(
   goalName: string,
@@ -384,7 +327,6 @@ Return JSON:
     return JSON.parse(content);
   } catch (error: any) {
     console.error('⚠️ Preview generation failed:', error.message);
-    // Return placeholder
     const placeholder = (weekNum: number, focus: string) => ({
       week_number: weekNum,
       focus,
@@ -404,7 +346,7 @@ Return JSON:
 }
 
 /**
- * 🆕 Format week preview for chat display
+ * Format week preview for chat display
  */
 function formatWeekPreview(week: any): string {
   let output = `\n📅 **Week ${week.week_number}** - ${week.focus}\n`;
@@ -420,7 +362,7 @@ function formatWeekPreview(week: any): string {
 }
 
 /**
- * 🆕 Apply edits to preview weeks based on user request
+ * Apply edits to preview weeks based on user request
  */
 async function applyPlanEdits(
   currentPreview: { week1: any; midWeek: any; finalWeek: any },
@@ -482,16 +424,6 @@ Return JSON:
 
 /**
  * Generate a batch of weeks for the training plan
- * @param goalName - Name of the goal
- * @param category - Goal category
- * @param sessionsPerWeek - Number of sessions per week
- * @param weeklyHours - Hours per week
- * @param startWeek - Starting week number (1-indexed)
- * @param endWeek - Ending week number (inclusive)
- * @param totalWeeks - Total weeks in the full plan
- * @param milestones - Array of milestones
- * @param previousWeekFocus - Focus of the last week from previous batch (for continuity)
- * @param planEdits - 🆕 Optional user customizations to apply
  */
 async function generateWeekBatch(
   goalName: string,
@@ -510,7 +442,6 @@ async function generateWeekBatch(
     return targetWeek && targetWeek >= startWeek && targetWeek <= endWeek;
   });
 
-  // 🆕 Include any edit instructions from user customizations
   const editInstructions = planEdits?.editInstructions || '';
 
   const prompt = `Create detailed weekly training sessions for weeks ${startWeek}-${endWeek} of a ${totalWeeks}-week plan.
@@ -569,7 +500,7 @@ Include helpful tips that show expertise.`,
         { role: 'user', content: prompt },
       ],
       temperature: 0.4,
-      max_tokens: 4000, // ✅ INCREASED from 2500 to handle more sessions
+      max_tokens: 4000,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -585,9 +516,6 @@ Include helpful tips that show expertise.`,
 
 /**
  * Generate complete weekly training plan using batched requests
- * This handles plans of ANY length by generating in 4-week chunks
- * ✅ Includes retry logic with smaller batches on failure
- * 🆕 Accepts planEdits for user customizations
  */
 async function generateFullWeeklyPlan(
   goalName: string,
@@ -608,12 +536,11 @@ async function generateFullWeeklyPlan(
     console.log(`  📝 Applying user customizations: ${planEdits.editInstructions}`);
   }
 
-  const BATCH_SIZE = 4; // ✅ REDUCED from 8 to 4 weeks (prevents token overflow)
-  const RETRY_BATCH_SIZE = 2; // If 4-week batch fails, try 2 weeks at a time
+  const BATCH_SIZE = 4;
+  const RETRY_BATCH_SIZE = 2;
   const allWeeks: any[] = [];
   let previousWeekFocus: string | undefined;
 
-  // Generate weeks in batches
   for (let startWeek = 1; startWeek <= totalWeeks; startWeek += BATCH_SIZE) {
     const endWeek = Math.min(startWeek + BATCH_SIZE - 1, totalWeeks);
     console.log(`  🔄 Generating weeks ${startWeek}-${endWeek}...`);
@@ -628,10 +555,9 @@ async function generateFullWeeklyPlan(
       totalWeeks,
       milestones,
       previousWeekFocus,
-      planEdits // 🆕 Pass user customizations
+      planEdits
     );
 
-    // ✅ RETRY LOGIC: If batch failed, try smaller chunks
     if (batchWeeks.length === 0 && endWeek - startWeek + 1 > RETRY_BATCH_SIZE) {
       console.log(`  🔁 Retrying with smaller batches (${RETRY_BATCH_SIZE} weeks at a time)...`);
       
@@ -649,7 +575,7 @@ async function generateFullWeeklyPlan(
           totalWeeks,
           milestones,
           previousWeekFocus,
-          planEdits // 🆕 Pass user customizations
+          planEdits
         );
         
         if (retryWeeks.length > 0) {
@@ -658,7 +584,6 @@ async function generateFullWeeklyPlan(
           previousWeekFocus = lastWeek?.focus;
           console.log(`    ✅ Retry succeeded: ${retryWeeks.length} weeks`);
         } else {
-          // Create placeholder for failed retry weeks
           console.log(`    ⚠️ Retry failed, creating placeholders for weeks ${retryStart}-${retryEnd}`);
           for (let w = retryStart; w <= retryEnd; w++) {
             batchWeeks.push({
@@ -674,20 +599,17 @@ async function generateFullWeeklyPlan(
           }
         }
         
-        // Small delay between retry batches
         await new Promise((resolve) => setTimeout(resolve, 300));
       }
     }
 
     if (batchWeeks.length > 0) {
       allWeeks.push(...batchWeeks);
-      // Get last week's focus for continuity
       const lastWeek = batchWeeks[batchWeeks.length - 1];
       previousWeekFocus = lastWeek?.focus;
       console.log(`  ✅ Generated ${batchWeeks.length} weeks`);
     } else {
       console.log(`  ⚠️ Batch returned empty, creating placeholder weeks`);
-      // Create placeholder weeks if batch fails completely
       for (let w = startWeek; w <= endWeek; w++) {
         allWeeks.push({
           week_number: w,
@@ -702,18 +624,15 @@ async function generateFullWeeklyPlan(
       }
     }
 
-    // Small delay between batches to avoid rate limiting
     if (endWeek < totalWeeks) {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
 
-  // Generate summary
   const summary = `Progressive ${totalWeeks}-week training plan for ${goalName}. 
 ${sessionsPerWeek} sessions per week, ${weeklyHours} hours total weekly commitment.
 ${milestones.length} key milestones to track progress.`;
 
-  // Map milestones with target weeks
   const mappedMilestones = milestones.map((m: any, i: number) => ({
     name: m.name,
     target_week: m.week || m.target_week || Math.round(((i + 1) * totalWeeks) / milestones.length),
@@ -800,7 +719,6 @@ Only return valid JSON, no other text.`;
 /**
  * POST /api/goals/conversation
  * Elite Coach conversational goal creation
- * 🆕 Phases: collecting → review → plan_preview → tracking_contract → done
  */
 router.post('/conversation', async (req: Request, res: Response) => {
   try {
@@ -822,9 +740,7 @@ router.post('/conversation', async (req: Request, res: Response) => {
 
     const scheduleContext = await buildScheduleContext(user_id);
 
-    // ============================================================
-    // 🆕 PHASE: TRACKING_CONTRACT - agree on what to track
-    // ============================================================
+    // PHASE: TRACKING_CONTRACT
     if (phase === 'tracking_contract' && conversation_state?.goal) {
       const lower = message.toLowerCase();
       
@@ -841,7 +757,7 @@ router.post('/conversation', async (req: Request, res: Response) => {
           weekly_hours: conversation_state.weekly_hours,
           total_hours: conversation_state.total_hours,
           sessions_per_week: conversation_state.sessions_per_week,
-          plan_edits: conversation_state.plan_edits, // 🆕 Pass customizations
+          plan_edits: conversation_state.plan_edits,
           message: `🎉 Excellent! Creating your "${conversation_state.goal.name}" plan now with your customizations...\n\nI'll track: ${(conversation_state.tracking_metrics || []).join(', ')}\n\nLet's make it happen!`,
           state: {
             ...conversation_state,
@@ -851,7 +767,6 @@ router.post('/conversation', async (req: Request, res: Response) => {
         });
       }
 
-      // User wants to modify tracking
       const category = conversation_state.goal.category || 'default';
       const metrics = TRACKING_METRICS[category] || TRACKING_METRICS.default;
       const allAvailableMetrics = [...metrics.default, ...metrics.optional];
@@ -869,7 +784,7 @@ If they want to add something, find the closest matching key from the list. If t
 Return JSON:
 {
   "message": "Your response confirming the changes and listing the final metrics",
-  "tracking_metrics": ["duration_mins", "effort_level"]  // ONLY use valid keys from the list above
+  "tracking_metrics": ["duration_mins", "effort_level"]
 }`;
 
       const response = await openai.chat.completions.create({
@@ -898,9 +813,7 @@ Return JSON:
       });
     }
 
-    // ============================================================
-    // 🆕 PHASE: PLAN_PREVIEW - show training plan, allow edits
-    // ============================================================
+    // PHASE: PLAN_PREVIEW
     if (phase === 'plan_preview' && conversation_state?.goal && conversation_state?.preview) {
       const lower = message.toLowerCase();
       
@@ -909,12 +822,10 @@ Return JSON:
       if (userAccepts) {
         console.log('✅ User accepted plan preview – moving to tracking contract');
 
-        // Get category-specific default tracking metrics
         const category = conversation_state.goal.category || 'default';
         const metrics = TRACKING_METRICS[category] || TRACKING_METRICS.default;
         const defaultMetrics = [...metrics.default];
 
-        // Build tracking question
         let trackingQuestion = `Perfect! Your training plan is locked in. 🔒\n\n`;
         trackingQuestion += `**One last thing** - let's set up progress tracking.\n\n`;
         trackingQuestion += `For ${category} goals, I'd typically ask after each session:\n`;
@@ -937,7 +848,6 @@ Return JSON:
         });
       }
 
-      // User wants to edit the plan
       console.log('✏️ User requesting plan edit');
 
       const { updatedPreview, editSummary } = await applyPlanEdits(
@@ -947,11 +857,9 @@ Return JSON:
         conversation_state.goal.category
       );
 
-      // Store the edit instruction for full plan generation later
       const planEdits = conversation_state.plan_edits || { editInstructions: '' };
       planEdits.editInstructions += `\n- ${message}`;
 
-      // Format updated preview
       let previewMessage = `✏️ ${editSummary}\n\nHere's your updated plan:\n`;
       previewMessage += formatWeekPreview(updatedPreview.week1);
       previewMessage += `\n...\n`;
@@ -973,9 +881,7 @@ Return JSON:
       });
     }
 
-    // ============================================================
-    // PHASE: REVIEW – user is looking at a proposed plan (hours/milestones)
-    // ============================================================
+    // PHASE: REVIEW
     if (
       phase === 'review' &&
       conversation_state?.goal &&
@@ -989,7 +895,6 @@ Return JSON:
         );
 
       if (userAccepts) {
-        // 🆕 Instead of completing here, generate plan preview
         console.log('✅ User accepted commitment – generating plan preview');
 
         const totalWeeks = conversation_state.total_weeks || Math.ceil((conversation_state.total_hours || 50) / (conversation_state.weekly_hours || 5));
@@ -1003,7 +908,6 @@ Return JSON:
           conversation_state.milestones || []
         );
 
-        // Format preview message
         let previewMessage = `Great! Let me show you what your training will look like:\n`;
         previewMessage += formatWeekPreview(preview.week1);
         previewMessage += `\n...\n`;
@@ -1031,7 +935,6 @@ Return JSON:
         });
       }
 
-      // User wants changes to commitment
       console.log('♻️ User requested changes to plan');
 
       const updatePrompt = `You are an elite performance coach. The user wants to modify their plan.
@@ -1065,7 +968,7 @@ Respond with JSON only:
     "milestones": [
       { "name": "Specific milestone", "hours": 20, "week": 4 }
     ],
-    "tracking_criteria": ["duration_mins", "effort_level"],  // Use standardized keys only (duration_mins, effort_level, distance_km, etc.)
+    "tracking_criteria": ["duration_mins", "effort_level"],
     "weekly_hours": number,
     "sessions_per_week": number,
     "total_hours": number,
@@ -1108,10 +1011,7 @@ Respond with JSON only:
       });
     }
 
-    // ============================================================
-    // PHASE: COLLECTING – Elite Coach conversation
-    // ============================================================
-
+    // PHASE: COLLECTING
     const knownInfo = {
       goal_name: conversation_state?.goal_name || null,
       current_level: conversation_state?.current_level || null,
@@ -1128,7 +1028,6 @@ Respond with JSON only:
 
     const systemPrompt = ELITE_COACH_PROMPT + '\n\n' + scheduleContext;
 
-    // Get current date for accurate target_date calculation
     const today = new Date();
     const currentDateStr = today.toISOString().split('T')[0];
     const currentDateReadable = today.toLocaleDateString('en-GB', { 
@@ -1186,13 +1085,7 @@ RESPOND WITH JSON:
     "milestones": [
       { "name": "Specific measurable milestone", "hours": calculated_hours, "week": target_week }
     ],
-    "tracking_criteria": ["duration_mins", "effort_level"],  // MUST use standardized keys from this list:
-    // fitness: duration_mins, effort_level, distance_km, time_mins, heart_rate, pain_notes, weight_kg, reps, sets
-    // languages: duration_mins, effort_level, new_vocabulary_count, conversation_mins, lessons_completed
-    // business: duration_mins, tasks_completed, revenue, users, meetings_held, blockers
-    // climbing: duration_mins, effort_level, highest_grade, problems_sent, attempts, pain_notes
-    // creative: duration_mins, output_count, words_written, pieces_created, practice_quality
-    // default: duration_mins, effort_level, notes
+    "tracking_criteria": ["duration_mins", "effort_level"],
     "weekly_hours": calculated_number,
     "sessions_per_week": calculated_number,
     "total_hours": calculated_number,
@@ -1276,7 +1169,6 @@ RESPOND WITH JSON:
 /**
  * POST /api/goals
  * Create a new goal
- * 🆕 Now accepts preferred_days and preferred_time for scheduling
  */
 router.post('/', async (req: Request, res: Response) => {
   try {
@@ -1337,10 +1229,6 @@ router.post('/', async (req: Request, res: Response) => {
 /**
  * POST /api/goals/:goalId/create-plan-with-milestones
  * Create training plan with BATCHED weekly plan generation
- * ✅ NO WEEK LIMIT - handles any duration
- * ✅ High quality detailed sessions
- * ✅ Robust error handling with retry logic
- * 🆕 Accepts plan_edits for user customizations
  */
 router.post(
   '/:goalId/create-plan-with-milestones',
@@ -1353,7 +1241,7 @@ router.post(
         sessions_per_week,
         total_hours,
         tracking_criteria,
-        plan_edits, // 🆕 User customizations
+        plan_edits,
       } = req.body;
 
       console.log(
@@ -1363,7 +1251,6 @@ router.post(
         console.log(`  📝 With customizations: ${plan_edits.editInstructions}`);
       }
 
-      // Get goal details
       const { data: goal, error: goalError } = await supabase
         .from('goals')
         .select('*')
@@ -1375,7 +1262,6 @@ router.post(
         return res.status(404).json({ error: 'Goal not found' });
       }
 
-      // Normalise numbers
       const baseWeekly = Number(weekly_hours) || 5;
       const baseTotal = Number(total_hours) || 50;
       const baseSessions = Number(sessions_per_week) || 3;
@@ -1384,7 +1270,6 @@ router.post(
 
       console.log(`📊 Plan: ${totalWeeks} weeks, ${baseSessions} sessions/week, ${baseWeekly}h/week`);
 
-      // Create base plan object
       const plan: any = {
         weekly_hours: baseWeekly,
         sessions_per_week: baseSessions,
@@ -1396,7 +1281,6 @@ router.post(
         custom: true,
       };
 
-      // Generate full weekly plan using batched requests
       try {
         const weeklyPlan = await generateFullWeeklyPlan(
           goal.name,
@@ -1405,7 +1289,7 @@ router.post(
           baseWeekly,
           totalWeeks,
           safeMilestones,
-          plan_edits // 🆕 Pass user customizations
+          plan_edits
         );
 
         plan.weekly_plan = weeklyPlan;
@@ -1413,7 +1297,6 @@ router.post(
       } catch (weeklyErr: any) {
         console.error('⚠️ Weekly plan generation failed:', weeklyErr.message);
         
-        // Fallback plan
         plan.weekly_plan = {
           summary: `Progressive ${totalWeeks}-week training plan for ${goal.name}`,
           realism_notes: 'Detailed weekly breakdown could not be generated. Follow your milestones as a guide.',
@@ -1426,7 +1309,6 @@ router.post(
         };
       }
 
-      // Save plan to goal
       const { error: updateError } = await supabase
         .from('goals')
         .update({ plan })
@@ -1434,7 +1316,6 @@ router.post(
 
       if (updateError) throw updateError;
 
-      // Insert micro-goals
       const microGoalsToInsert = safeMilestones.map((mg: any, index: number) => ({
         goal_id: goalId,
         name: mg.name || `Milestone ${index + 1}`,
@@ -1457,7 +1338,6 @@ router.post(
         }
       }
 
-      // Initialize progress
       const progress = {
         percent_complete: 0,
         completed_micro_goals: 0,
@@ -1471,8 +1351,6 @@ router.post(
         `✅ Created plan: ${baseWeekly}h/week, ${baseSessions} sessions, ${totalWeeks} weeks, ${safeMilestones.length} milestones`
       );
 
-      // 🆕 AUTO-GENERATE FULL SCHEDULE FOR THIS GOAL
-      // Fetch goal with updated plan for schedule generation
       const { data: updatedGoal } = await supabase
         .from('goals')
         .select('*')
@@ -1481,7 +1359,6 @@ router.post(
 
       if (updatedGoal) {
         try {
-          // Call schedule generation endpoint
           const apiUrl = process.env.API_URL || 'http://localhost:8080';
           const scheduleResponse = await axios.post(
             `${apiUrl}/api/schedule/generate-for-goal`,
@@ -1504,7 +1381,6 @@ router.post(
           });
         } catch (scheduleErr: any) {
           console.error('⚠️ Schedule generation failed (non-fatal):', scheduleErr.message);
-          // Still return success - plan was created, schedule can be generated later
         }
       }
 
@@ -1572,7 +1448,7 @@ router.get('/', async (req: Request, res: Response) => {
 
 /**
  * GET /api/goals/all-progress
- * Get session aggregates for all user's goals (for goals list page)
+ * Get session aggregates for all user's goals
  */
 router.get('/all-progress', async (req: Request, res: Response) => {
   try {
@@ -1584,7 +1460,6 @@ router.get('/all-progress', async (req: Request, res: Response) => {
 
     console.log(`📊 Fetching progress for all goals of user ${user_id}`);
 
-    // Get all completed sessions grouped by goal
     const { data: sessions, error } = await supabase
       .from('schedule_blocks')
       .select('goal_id, duration_mins, tracked_data')
@@ -1594,7 +1469,6 @@ router.get('/all-progress', async (req: Request, res: Response) => {
 
     if (error) throw error;
 
-    // Aggregate by goal_id
     const progressByGoal: Record<string, {
       total_sessions: number;
       total_minutes: number;
@@ -1616,7 +1490,6 @@ router.get('/all-progress', async (req: Request, res: Response) => {
       progressByGoal[s.goal_id].total_minutes += s.duration_mins || 0;
     });
 
-    // Calculate hours
     Object.keys(progressByGoal).forEach(goalId => {
       progressByGoal[goalId].total_hours = 
         Math.round(progressByGoal[goalId].total_minutes / 60 * 10) / 10;
@@ -1634,6 +1507,505 @@ router.get('/all-progress', async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================
+// 🆕 PHASE 2: TIME BUDGET ENDPOINT
+// ============================================================
+
+/**
+ * GET /api/goals/time-budget
+ * Get weekly time breakdown: work, commute, events, training, free
+ */
+router.get('/time-budget', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'Missing user_id' });
+    }
+
+    console.log(`📊 Calculating time budget for user ${user_id}`);
+
+    // Get user availability for awake hours
+    const { data: availability } = await supabase
+      .from('user_availability')
+      .select('wake_time, sleep_time')
+      .eq('user_id', user_id)
+      .single();
+
+    // Calculate awake hours per week
+    let awakeHoursPerWeek = 112; // Default: 16h * 7 days
+    if (availability?.wake_time && availability?.sleep_time) {
+      const [wakeH, wakeM] = availability.wake_time.split(':').map(Number);
+      const [sleepH, sleepM] = availability.sleep_time.split(':').map(Number);
+      const awakeMinutesPerDay = (sleepH * 60 + sleepM) - (wakeH * 60 + wakeM);
+      awakeHoursPerWeek = Math.round((awakeMinutesPerDay / 60) * 7 * 10) / 10;
+    }
+
+    // Get this week's date range
+    const today = new Date();
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+    startOfWeek.setHours(0, 0, 0, 0);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 7);
+
+    // Get schedule blocks for this week
+    const { data: blocks } = await supabase
+      .from('schedule_blocks')
+      .select('type, duration_mins, goal_id')
+      .eq('user_id', user_id)
+      .gte('scheduled_start', startOfWeek.toISOString())
+      .lt('scheduled_start', endOfWeek.toISOString());
+
+    // Calculate hours by type
+    let workMins = 0;
+    let commuteMins = 0;
+    let eventMins = 0;
+    let trainingMins = 0;
+
+    (blocks || []).forEach(block => {
+      const mins = block.duration_mins || 0;
+      switch (block.type) {
+        case 'work':
+          workMins += mins;
+          break;
+        case 'commute':
+          commuteMins += mins;
+          break;
+        case 'event':
+        case 'social':
+          eventMins += mins;
+          break;
+        default:
+          if (block.goal_id) {
+            trainingMins += mins;
+          }
+      }
+    });
+
+    // Also get training hours from goals (in case schedule hasn't been generated)
+    const { data: goals } = await supabase
+      .from('goals')
+      .select('plan')
+      .eq('user_id', user_id)
+      .eq('status', 'active');
+
+    const plannedTrainingHours = (goals || []).reduce((sum, g) => sum + (g.plan?.weekly_hours || 0), 0);
+
+    // Use the higher of scheduled or planned training
+    const trainingHours = Math.max(
+      Math.round(trainingMins / 60 * 10) / 10,
+      plannedTrainingHours
+    );
+
+    const workHours = Math.round(workMins / 60 * 10) / 10;
+    const commuteHours = Math.round(commuteMins / 60 * 10) / 10;
+    const eventHours = Math.round(eventMins / 60 * 10) / 10;
+    const committedHours = workHours + commuteHours + eventHours + trainingHours;
+    const freeHours = Math.max(0, Math.round((awakeHoursPerWeek - committedHours) * 10) / 10);
+
+    console.log(`✅ Time budget: ${workHours}h work, ${commuteHours}h commute, ${eventHours}h events, ${trainingHours}h training, ${freeHours}h free`);
+
+    return res.json({
+      work_hours: workHours,
+      commute_hours: commuteHours,
+      event_hours: eventHours,
+      training_hours: trainingHours,
+      committed_hours: committedHours,
+      awake_hours: awakeHoursPerWeek,
+      free_hours: freeHours,
+    });
+  } catch (error: any) {
+    console.error('❌ Time budget error:', error);
+    return res.status(500).json({
+      error: 'Failed to calculate time budget',
+      message: error.message,
+    });
+  }
+});
+
+// ============================================================
+// 🆕 PHASE 2: GOAL INTENSITY & PREFERENCES
+// ============================================================
+
+/**
+ * PATCH /api/goals/:goalId/intensity
+ * Update goal intensity level
+ */
+router.patch('/:goalId/intensity', async (req: Request, res: Response) => {
+  try {
+    const { goalId } = req.params;
+    const { intensity } = req.body;
+
+    if (!intensity || !['light', 'standard', 'intense', 'extreme'].includes(intensity)) {
+      return res.status(400).json({
+        error: 'Invalid intensity. Must be: light, standard, intense, or extreme',
+      });
+    }
+
+    console.log(`🔥 Updating intensity for goal ${goalId} to ${intensity}`);
+
+    const { data: goal, error } = await supabase
+      .from('goals')
+      .update({ intensity })
+      .eq('id', goalId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return res.json({
+      success: true,
+      goal,
+      message: `Intensity set to ${intensity}`,
+    });
+  } catch (error: any) {
+    console.error('❌ Intensity update error:', error);
+    return res.status(500).json({
+      error: 'Failed to update intensity',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * PATCH /api/goals/:goalId/preferences
+ * Update goal scheduling preferences (days, hours, sessions)
+ */
+router.patch('/:goalId/preferences', async (req: Request, res: Response) => {
+  try {
+    const { goalId } = req.params;
+    const { preferred_days, weekly_hours, sessions_per_week, preferred_time } = req.body;
+
+    console.log(`⚙️ Updating preferences for goal ${goalId}`);
+
+    // Get current goal
+    const { data: goal, error: fetchError } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('id', goalId)
+      .single();
+
+    if (fetchError || !goal) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+
+    // Build updates
+    const updates: any = {};
+    
+    if (preferred_days) {
+      updates.preferred_days = preferred_days;
+    }
+    
+    if (preferred_time) {
+      updates.preferred_time = preferred_time;
+    }
+
+    // Update plan if hours/sessions changed
+    if (weekly_hours !== undefined || sessions_per_week !== undefined) {
+      const plan = goal.plan || {};
+      if (weekly_hours !== undefined) {
+        plan.weekly_hours = weekly_hours;
+        // Recalculate total weeks
+        if (plan.total_estimated_hours) {
+          plan.total_weeks = Math.ceil(plan.total_estimated_hours / weekly_hours);
+        }
+      }
+      if (sessions_per_week !== undefined) {
+        plan.sessions_per_week = sessions_per_week;
+      }
+      updates.plan = plan;
+    }
+
+    // Update goal
+    const { data: updatedGoal, error: updateError } = await supabase
+      .from('goals')
+      .update(updates)
+      .eq('id', goalId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Calculate new target date if weekly hours changed
+    let newTargetDate = goal.target_date;
+    if (weekly_hours !== undefined && updatedGoal.plan?.total_estimated_hours) {
+      const totalWeeks = Math.ceil(updatedGoal.plan.total_estimated_hours / weekly_hours);
+      const startDate = new Date(goal.created_at);
+      newTargetDate = new Date(startDate);
+      newTargetDate.setDate(startDate.getDate() + totalWeeks * 7);
+      
+      await supabase
+        .from('goals')
+        .update({ target_date: newTargetDate.toISOString().split('T')[0] })
+        .eq('id', goalId);
+    }
+
+    return res.json({
+      success: true,
+      goal: updatedGoal,
+      new_target_date: newTargetDate,
+      message: 'Preferences updated',
+    });
+  } catch (error: any) {
+    console.error('❌ Preferences update error:', error);
+    return res.status(500).json({
+      error: 'Failed to update preferences',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/goals/:goalId/intensify-preview
+ * Generate a preview of intensified sessions (doesn't save)
+ */
+router.post('/:goalId/intensify-preview', async (req: Request, res: Response) => {
+  try {
+    const { goalId } = req.params;
+
+    console.log(`🔥 Generating intensify preview for goal ${goalId}`);
+
+    // Get goal
+    const { data: goal, error: fetchError } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('id', goalId)
+      .single();
+
+    if (fetchError || !goal) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+
+    // Get future scheduled sessions (limit to 6 for preview)
+    const today = new Date();
+    const { data: futureSessions, error: sessionsError } = await supabase
+      .from('schedule_blocks')
+      .select('id, duration_mins, notes, scheduled_start')
+      .eq('goal_id', goalId)
+      .eq('status', 'scheduled')
+      .gt('scheduled_start', today.toISOString())
+      .order('scheduled_start', { ascending: true })
+      .limit(6);
+
+    if (sessionsError) throw sessionsError;
+
+    if (!futureSessions || futureSessions.length === 0) {
+      return res.json({
+        success: false,
+        message: 'No future sessions to intensify',
+        preview: [],
+      });
+    }
+
+    // Parse current sessions
+    const currentSessions = futureSessions.map(s => {
+      const [name, description, tip] = (s.notes || '|||').split('|||');
+      return {
+        id: s.id,
+        name: name || 'Training Session',
+        description: description || '',
+        tip: tip || '',
+        duration_mins: s.duration_mins,
+        scheduled_start: s.scheduled_start,
+      };
+    });
+
+    // Use AI to generate intensified versions
+    const prompt = `You are an elite ${goal.category} coach. Intensify these training sessions to be 20% more challenging.
+
+GOAL: ${goal.name}
+CATEGORY: ${goal.category}
+
+CURRENT SESSIONS:
+${currentSessions.map((s, i) => `${i + 1}. "${s.name}" (${s.duration_mins} min)
+   Description: ${s.description}
+   Tip: ${s.tip}`).join('\n\n')}
+
+For each session, create an INTENSIFIED version that:
+- Has a more challenging name (e.g., "Easy Run" → "Tempo Run with Hills")
+- Has harder description (more reps, heavier weight, faster pace, longer holds, etc.)
+- Has a motivating tip that pushes them
+- Is 10-20% longer in duration
+
+Return JSON:
+{
+  "intensified": [
+    {
+      "original_id": "session id",
+      "name": "Intensified session name",
+      "description": "Harder description with specific numbers",
+      "tip": "Motivating tip",
+      "duration_mins": increased_duration
+    }
+  ]
+}`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: 'You are an expert coach who knows how to progressively intensify training. Be specific with numbers and targets.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.4,
+      max_tokens: 2000,
+    });
+
+    const content = response.choices[0]?.message?.content || '{}';
+    const parsed = JSON.parse(content);
+    const intensified = parsed.intensified || [];
+
+    // Build preview with before/after
+    const preview = currentSessions.map((current, i) => {
+      const intense = intensified[i] || {
+        name: `Intense ${current.name}`,
+        description: `${current.description} - Push harder!`,
+        tip: 'Give it your all!',
+        duration_mins: Math.round(current.duration_mins * 1.15),
+      };
+
+      return {
+        id: current.id,
+        before: {
+          name: current.name,
+          description: current.description,
+          tip: current.tip,
+          duration_mins: current.duration_mins,
+        },
+        after: {
+          name: intense.name,
+          description: intense.description,
+          tip: intense.tip,
+          duration_mins: intense.duration_mins,
+        },
+      };
+    });
+
+    // Count total future sessions
+    const { count } = await supabase
+      .from('schedule_blocks')
+      .select('*', { count: 'exact', head: true })
+      .eq('goal_id', goalId)
+      .eq('status', 'scheduled')
+      .gt('scheduled_start', today.toISOString());
+
+    console.log(`✅ Generated preview for ${preview.length} sessions`);
+
+    return res.json({
+      success: true,
+      preview,
+      total_sessions: count || futureSessions.length,
+      message: `Preview of ${preview.length} sessions (${count} total will be updated)`,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Intensify preview error:', error);
+    return res.status(500).json({
+      error: 'Failed to generate preview',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/goals/:goalId/intensify-apply
+ * Apply intensified sessions (saves to database)
+ */
+router.post('/:goalId/intensify-apply', async (req: Request, res: Response) => {
+  try {
+    const { goalId } = req.params;
+    const { preview } = req.body; // Array of { id, after: { name, description, tip, duration_mins } }
+
+    if (!preview || !Array.isArray(preview)) {
+      return res.status(400).json({ error: 'Missing preview data' });
+    }
+
+    console.log(`🔥 Applying intensified sessions for goal ${goalId}`);
+
+    // Get goal for category
+    const { data: goal, error: fetchError } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('id', goalId)
+      .single();
+
+    if (fetchError || !goal) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+
+    // Get ALL future sessions (not just preview)
+    const today = new Date();
+    const { data: allFutureSessions, error: sessionsError } = await supabase
+      .from('schedule_blocks')
+      .select('id, duration_mins, notes, scheduled_start')
+      .eq('goal_id', goalId)
+      .eq('status', 'scheduled')
+      .gt('scheduled_start', today.toISOString())
+      .order('scheduled_start', { ascending: true });
+
+    if (sessionsError) throw sessionsError;
+
+    // Update sessions that were in preview
+    const previewIds = new Set(preview.map((p: any) => p.id));
+    let updatedCount = 0;
+
+    for (const p of preview) {
+      const notes = `${p.after.name}|||${p.after.description}|||🔥 ${p.after.tip}`;
+      
+      const { error: updateError } = await supabase
+        .from('schedule_blocks')
+        .update({
+          duration_mins: p.after.duration_mins,
+          notes,
+        })
+        .eq('id', p.id);
+
+      if (!updateError) updatedCount++;
+    }
+
+    // For remaining sessions not in preview, apply 15% intensity increase
+    const remainingSessions = (allFutureSessions || []).filter(s => !previewIds.has(s.id));
+    
+    for (const session of remainingSessions) {
+      const [name, description, tip] = (session.notes || '|||').split('|||');
+      const newDuration = Math.round(session.duration_mins * 1.15);
+      const newNotes = `${name}|||${description}|||🔥 INTENSIFIED: ${tip || 'Push harder!'}`;
+
+      const { error: updateError } = await supabase
+        .from('schedule_blocks')
+        .update({
+          duration_mins: newDuration,
+          notes: newNotes,
+        })
+        .eq('id', session.id);
+
+      if (!updateError) updatedCount++;
+    }
+
+    // Update goal intensity level
+    await supabase
+      .from('goals')
+      .update({ intensity: 'intense' })
+      .eq('id', goalId);
+
+    console.log(`✅ Applied intensification to ${updatedCount} sessions`);
+
+    return res.json({
+      success: true,
+      sessions_updated: updatedCount,
+      message: `🔥 Intensified ${updatedCount} sessions! Let's go!`,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Intensify apply error:', error);
+    return res.status(500).json({
+      error: 'Failed to apply intensification',
+      message: error.message,
+    });
+  }
+});
+
 /**
  * GET /api/goals/:goalId/sessions
  * Get completed sessions with tracked data for a goal
@@ -1645,7 +2017,6 @@ router.get('/:goalId/sessions', async (req: Request, res: Response) => {
 
     console.log(`📊 Fetching sessions for goal ${goalId}`);
 
-    // Get completed schedule blocks for this goal
     const { data: sessions, error } = await supabase
       .from('schedule_blocks')
       .select('id, scheduled_start, duration_mins, status, completed_at, notes, tracked_data')
@@ -1656,12 +2027,10 @@ router.get('/:goalId/sessions', async (req: Request, res: Response) => {
 
     if (error) throw error;
 
-    // Calculate aggregates
     const totalSessions = sessions?.length || 0;
     const totalMinutes = sessions?.reduce((sum, s) => sum + (s.duration_mins || 0), 0) || 0;
     const totalHours = Math.round(totalMinutes / 60 * 10) / 10;
 
-    // Calculate average effort (if tracked)
     const effortValues = sessions
       ?.map(s => s.tracked_data?.effort_level || s.tracked_data?.effort)
       .filter(e => e !== undefined && e !== null) || [];
@@ -1669,7 +2038,6 @@ router.get('/:goalId/sessions', async (req: Request, res: Response) => {
       ? Math.round(effortValues.reduce((a, b) => a + b, 0) / effortValues.length * 10) / 10
       : null;
 
-    // Calculate total distance (if tracked)
     const distanceValues = sessions
       ?.map(s => s.tracked_data?.distance_km || s.tracked_data?.distance)
       .filter(d => d !== undefined && d !== null) || [];
@@ -1677,7 +2045,6 @@ router.get('/:goalId/sessions', async (req: Request, res: Response) => {
       ? Math.round(distanceValues.reduce((a, b) => a + b, 0) * 10) / 10
       : null;
 
-    // Format sessions for response
     const formattedSessions = sessions?.map(s => {
       const sessionName = s.notes?.split('|||')[0] || 'Training Session';
       return {
@@ -1706,6 +2073,76 @@ router.get('/:goalId/sessions', async (req: Request, res: Response) => {
     console.error('❌ Sessions fetch error:', error);
     return res.status(500).json({
       error: 'Failed to fetch sessions',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/goals/:goalId/schedule
+ * Get ALL scheduled sessions for a goal (past, present, future)
+ */
+router.get('/:goalId/schedule', async (req: Request, res: Response) => {
+  try {
+    const { goalId } = req.params;
+
+    console.log(`📅 Fetching full schedule for goal ${goalId}`);
+
+    const { data: sessions, error } = await supabase
+      .from('schedule_blocks')
+      .select('*')
+      .eq('goal_id', goalId)
+      .order('scheduled_start', { ascending: true });
+
+    if (error) throw error;
+
+    // Group by week
+    const sessionsByWeek: Record<number, any[]> = {};
+    const today = new Date();
+    
+    // Get goal start date
+    const { data: goal } = await supabase
+      .from('goals')
+      .select('created_at')
+      .eq('id', goalId)
+      .single();
+
+    const goalStart = goal ? new Date(goal.created_at) : today;
+    goalStart.setHours(0, 0, 0, 0);
+
+    (sessions || []).forEach(session => {
+      const sessionDate = new Date(session.scheduled_start);
+      const weekNum = Math.floor((sessionDate.getTime() - goalStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+      
+      if (!sessionsByWeek[weekNum]) {
+        sessionsByWeek[weekNum] = [];
+      }
+      
+      // Parse notes into name/description/tip
+      const [name, description, tip] = (session.notes || '|||').split('|||');
+      
+      sessionsByWeek[weekNum].push({
+        ...session,
+        parsed_name: name || 'Training Session',
+        parsed_description: description || '',
+        parsed_tip: tip || '',
+        week_number: weekNum,
+        is_past: sessionDate < today,
+        is_today: sessionDate.toDateString() === today.toDateString(),
+      });
+    });
+
+    console.log(`✅ Found ${sessions?.length || 0} sessions across ${Object.keys(sessionsByWeek).length} weeks`);
+
+    return res.json({
+      sessions: sessions || [],
+      sessions_by_week: sessionsByWeek,
+      total_sessions: sessions?.length || 0,
+    });
+  } catch (error: any) {
+    console.error('❌ Schedule fetch error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch schedule',
       message: error.message,
     });
   }

@@ -327,7 +327,7 @@ What's your goal?`,
               onKeyDown={handleKeyDown}
               placeholder="Type your message..."
               disabled={isProcessing}
-              className="flex-1 px-4 py-3 border border-gray-200 rounded-full focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none disabled:opacity-50 bg-white"
+              className="flex-1 px-4 py-3 border border-gray-200 rounded-full focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none disabled:opacity-50 bg-white text-gray-900 placeholder:text-gray-400"
             />
             <button
               onClick={handleSend}
