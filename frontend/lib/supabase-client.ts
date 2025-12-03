@@ -3,7 +3,20 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    // Persist session in localStorage (survives browser close)
+    persistSession: true,
+    // Use localStorage instead of sessionStorage
+    storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+    // Auto-refresh token before it expires
+    autoRefreshToken: true,
+    // Detect session from URL (for OAuth redirects)
+    detectSessionInUrl: true,
+    // Flow type for better mobile support
+    flowType: 'pkce',
+  },
+});
 
 // Auth helper functions
 export const signUp = async (email: string, password: string) => {

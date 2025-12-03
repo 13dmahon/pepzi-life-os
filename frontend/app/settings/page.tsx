@@ -14,7 +14,11 @@ import {
   Plus,
   X,
   Save,
-  Check
+  Check,
+  User,
+  Mail,
+  LogOut,
+  ChevronRight,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -30,9 +34,15 @@ export default function SettingsPage() {
 }
 
 function SettingsContent() {
-  const { profile, updateProfile } = useAuth();
+  const { user, profile, updateProfile, signOut } = useAuth();
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  
+  // Profile editing
+  const [editingName, setEditingName] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [savingName, setSavingName] = useState(false);
   
   const [wakeTime, setWakeTime] = useState('07:00');
   const [sleepTime, setSleepTime] = useState('23:00');
@@ -54,6 +64,7 @@ function SettingsContent() {
   // Load profile data
   useEffect(() => {
     if (profile) {
+      setNewName(profile.name || '');
       setWakeTime(profile.wake_time || '07:00');
       setSleepTime(profile.sleep_time || '23:00');
       setCommuteMins(profile.daily_commute_mins || 0);
@@ -76,6 +87,36 @@ function SettingsContent() {
       }
     }
   }, [profile]);
+
+  const getInitials = () => {
+    if (profile?.name) {
+      return profile.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+    }
+    return user?.email?.slice(0, 2).toUpperCase() || '??';
+  };
+
+  const handleSaveName = async () => {
+    if (!newName.trim()) return;
+    setSavingName(true);
+    try {
+      await updateProfile({ name: newName.trim() });
+      setEditingName(false);
+    } catch (error) {
+      console.error('Failed to update name:', error);
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await signOut();
+    } catch (error) {
+      console.error('Logout error:', error);
+      setIsLoggingOut(false);
+    }
+  };
 
   const toggleWorkDay = (day: string) => {
     setWorkDays(prev => 
@@ -131,19 +172,80 @@ function SettingsContent() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b sticky top-0 z-10">
-        <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-4">
-          <Link href="/" className="p-2 hover:bg-gray-100 rounded-lg">
-            <ArrowLeft className="w-5 h-5 text-gray-600" />
-          </Link>
-          <h1 className="text-xl font-bold text-gray-900">Settings</h1>
-          <div className="flex-1" />
+    <div className="min-h-screen bg-gray-50 pb-24 md:pb-8">
+      {/* Header with Profile */}
+      <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white">
+        <div className="max-w-2xl mx-auto px-4 pt-4 pb-6">
+          <div className="flex items-center gap-4 mb-6">
+            <Link href="/" className="p-2 hover:bg-white/20 rounded-lg transition-colors">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <h1 className="text-xl font-bold">Settings</h1>
+          </div>
+          
+          {/* Profile Card */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-4">
+            <div className="flex items-center gap-4">
+              {/* Avatar */}
+              <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center text-2xl font-bold">
+                {getInitials()}
+              </div>
+              
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                {editingName ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      className="flex-1 px-3 py-1.5 rounded-lg bg-white/20 text-white placeholder-white/60 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50"
+                      placeholder="Your name"
+                      autoFocus
+                    />
+                    <button
+                      onClick={handleSaveName}
+                      disabled={savingName}
+                      className="px-3 py-1.5 bg-white text-purple-600 rounded-lg text-sm font-medium hover:bg-white/90 disabled:opacity-50"
+                    >
+                      {savingName ? '...' : 'Save'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditingName(false);
+                        setNewName(profile?.name || '');
+                      }}
+                      className="px-2 py-1.5 text-white/80 hover:text-white text-sm"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setEditingName(true)}
+                    className="text-left group"
+                  >
+                    <h2 className="text-xl font-semibold truncate group-hover:underline">
+                      {profile?.name || 'Tap to add name'}
+                    </h2>
+                  </button>
+                )}
+                <p className="text-white/80 text-sm truncate mt-1">{user?.email}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+        
+        {/* Save Button - Sticky */}
+        <div className="sticky top-0 z-10 -mx-4 px-4 py-3 bg-gray-50/95 backdrop-blur-sm border-b border-gray-200">
           <button
             onClick={handleSave}
             disabled={loading}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+            className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium transition-all ${
               saved
                 ? 'bg-green-500 text-white'
                 : 'bg-purple-500 text-white hover:bg-purple-600'
@@ -167,10 +269,7 @@ function SettingsContent() {
             )}
           </button>
         </div>
-      </div>
 
-      {/* Content */}
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
         {/* Sleep Schedule */}
         <div className="bg-white rounded-2xl p-6 shadow-sm">
           <div className="flex items-center gap-3 mb-4">
@@ -396,6 +495,28 @@ function SettingsContent() {
               Add commitment
             </button>
           )}
+        </div>
+
+        {/* Logout Section */}
+        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <button
+            onClick={handleLogout}
+            disabled={isLoggingOut}
+            className="w-full flex items-center gap-4 px-6 py-4 hover:bg-red-50 transition-colors disabled:opacity-50"
+          >
+            <div className="p-2 bg-red-100 rounded-lg">
+              <LogOut className="w-5 h-5 text-red-600" />
+            </div>
+            <span className="font-medium text-red-600">
+              {isLoggingOut ? 'Logging out...' : 'Log Out'}
+            </span>
+          </button>
+        </div>
+
+        {/* App Info */}
+        <div className="text-center text-sm text-gray-400 py-4">
+          <p>Pepzi v1.0.0</p>
+          <p className="mt-1">Made with 💜 for your goals</p>
         </div>
       </div>
     </div>

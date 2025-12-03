@@ -53,14 +53,25 @@ export default function SchedulePage() {
   const monthStart = startOfMonth(monthDate);
   const monthEnd = endOfMonth(monthDate);
 
-  // Fetch schedule for WEEK view
+  // Fetch schedule for WEEK view (wider range for mobile agenda scrolling)
   const {
     data: weekBlocks = [],
     isLoading: isLoadingWeek,
     refetch: refetchWeek,
   } = useQuery({
-    queryKey: ['schedule', userId, 'week', weekOffset],
-    queryFn: () => scheduleAPI.getWeek(userId, weekOffset),
+    queryKey: ['schedule', userId, 'week-extended'],
+    queryFn: async () => {
+      // Fetch from 4 weeks ago to 16 weeks ahead for mobile scrolling
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 28); // 4 weeks back
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + 112); // 16 weeks ahead
+      
+      const startStr = format(startDate, 'yyyy-MM-dd');
+      const endStr = format(endDate, 'yyyy-MM-dd');
+      const response = await scheduleAPI.getBlocks(userId, startStr, endStr);
+      return response.blocks || response;
+    },
     enabled: viewMode === 'week',
   });
 

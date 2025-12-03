@@ -3,6 +3,7 @@ import './globals.css';
 import Providers from './providers';
 import { AuthProvider } from '@/lib/auth-context';
 import AuthNavigation from '@/components/AuthNavigation';
+import BottomNav from '@/components/BottomNav';
 
 export const metadata: Metadata = {
   title: 'Pepzi - AI Life OS',
@@ -42,6 +43,7 @@ export default function RootLayout({
           <AuthProvider>
             <AuthNavigation />
             {children}
+            <BottomNav />
           </AuthProvider>
         </Providers>
       </body>
