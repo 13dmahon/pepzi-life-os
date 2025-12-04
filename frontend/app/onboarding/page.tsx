@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useRouter } from 'next/navigation';
 import { 
   Loader2, 
-  Sparkles, 
+  Mountain, 
   Sun, 
   Moon, 
   Briefcase, 
@@ -17,8 +17,11 @@ import {
   X,
   Car,
   Check,
-  Target
+  Target,
+  Sparkles,
+  Send
 } from 'lucide-react';
+import AddGoalModal from '@/components/goals/AddGoalModal';
 
 // Step components
 type OnboardingData = {
@@ -36,9 +39,22 @@ type OnboardingData = {
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+// ============================================================
+// GLASS CARD COMPONENT
+// ============================================================
+
+function GlassCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`backdrop-blur-2xl bg-white/70 border border-white/80 shadow-xl rounded-3xl ${className}`}>
+      {children}
+    </div>
+  );
+}
+
 export default function OnboardingPage() {
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [showGoalModal, setShowGoalModal] = useState(false);
   const { profile, updateProfile } = useAuth();
   const router = useRouter();
 
@@ -54,7 +70,7 @@ export default function OnboardingPage() {
     commitments: [],
   });
 
-  const totalSteps = 4;
+  const totalSteps = 5; // Added one more step for the goal
 
   const updateData = (updates: Partial<OnboardingData>) => {
     setData(prev => ({ ...prev, ...updates }));
@@ -72,9 +88,7 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleComplete = async () => {
-    setLoading(true);
-
+  const handleSaveProfile = async () => {
     try {
       // Build work schedule
       const work_schedule: Record<string, { start: string; end: string } | null> = {};
@@ -86,7 +100,7 @@ export default function OnboardingPage() {
         }
       }
 
-      const { error } = await updateProfile({
+      await updateProfile({
         wake_time: data.wake_time,
         sleep_time: data.sleep_time,
         work_schedule,
@@ -94,13 +108,16 @@ export default function OnboardingPage() {
         daily_commute_mins: data.has_commute ? data.commute_mins : 0,
         onboarding_complete: true,
       });
+    } catch (err) {
+      console.error('Failed to save profile:', err);
+    }
+  };
 
-      if (error) {
-        console.error('Failed to save onboarding:', error);
-        alert('Failed to save. Please try again.');
-      } else {
-        router.push('/');
-      }
+  const handleComplete = async () => {
+    setLoading(true);
+    try {
+      await handleSaveProfile();
+      router.push('/today');
     } catch (err) {
       console.error('Onboarding error:', err);
       alert('Something went wrong. Please try again.');
@@ -109,38 +126,58 @@ export default function OnboardingPage() {
     }
   };
 
+  const handleGoalCreated = async () => {
+    setShowGoalModal(false);
+    setLoading(true);
+    try {
+      await handleSaveProfile();
+      router.push('/today');
+    } catch (err) {
+      console.error('Onboarding error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-600 via-blue-600 to-cyan-500 flex items-center justify-center p-4">
-      {/* Background decoration */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-white/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-white/10 rounded-full blur-3xl" />
+    <div className="min-h-screen relative flex items-center justify-center p-4">
+      {/* Mountain Background */}
+      <div className="fixed inset-0 z-0">
+        <div 
+          className="absolute inset-0 bg-cover bg-bottom bg-no-repeat"
+          style={{
+            backgroundImage: `url('https://images.unsplash.com/photo-1454496522488-7a8e488e8606?auto=format&fit=crop&w=2076&q=80')`,
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-white/60 via-white/50 to-white/80" />
       </div>
 
       <div className="w-full max-w-lg relative z-10">
         {/* Header */}
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 bg-white rounded-2xl shadow-lg mb-3">
-            <Sparkles className="w-7 h-7 text-purple-600" />
+          <div className="inline-flex items-center justify-center w-14 h-14 backdrop-blur-xl bg-white/70 rounded-2xl border border-white/80 shadow-lg mb-3">
+            <Mountain className="w-7 h-7 text-slate-600" />
           </div>
-          <h1 className="text-2xl font-bold text-white">Let's set you up</h1>
-          <p className="text-white/80 mt-1">This helps us schedule around your life</p>
+          <h1 className="text-2xl font-bold text-slate-700">Let's set you up</h1>
+          <p className="text-slate-400 mt-1">This helps us schedule around your life</p>
         </div>
 
         {/* Progress Bar */}
-        <div className="flex gap-2 mb-6">
-          {Array.from({ length: totalSteps }).map((_, i) => (
-            <div
-              key={i}
-              className={`h-1.5 flex-1 rounded-full transition-all ${
-                i <= step ? 'bg-white' : 'bg-white/30'
-              }`}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-slate-400">Step {step + 1} of {totalSteps}</span>
+            <span className="text-sm text-slate-400">{Math.round(((step + 1) / totalSteps) * 100)}%</span>
+          </div>
+          <div className="h-2 bg-white/50 rounded-full overflow-hidden backdrop-blur-xl">
+            <div 
+              className="h-full bg-slate-600 rounded-full transition-all duration-500"
+              style={{ width: `${((step + 1) / totalSteps) * 100}%` }}
             />
-          ))}
+          </div>
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-3xl shadow-2xl p-6 min-h-[400px] flex flex-col">
+        <GlassCard className="p-6 min-h-[420px] flex flex-col">
           {/* Step Content */}
           <div className="flex-1">
             {step === 0 && (
@@ -155,14 +192,17 @@ export default function OnboardingPage() {
             {step === 3 && (
               <CommitmentsStep data={data} updateData={updateData} />
             )}
+            {step === 4 && (
+              <FirstGoalStep onOpenModal={() => setShowGoalModal(true)} />
+            )}
           </div>
 
           {/* Navigation */}
-          <div className="flex gap-3 mt-6 pt-4 border-t">
+          <div className="flex gap-3 mt-6 pt-4 border-t border-slate-100">
             {step > 0 && (
               <button
                 onClick={prevStep}
-                className="flex items-center gap-2 px-4 py-2.5 text-gray-600 hover:bg-gray-100 rounded-xl font-medium transition-colors"
+                className="flex items-center gap-2 px-4 py-2.5 text-slate-500 hover:bg-white/50 rounded-xl font-medium transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" />
                 Back
@@ -174,7 +214,7 @@ export default function OnboardingPage() {
             {step < totalSteps - 1 ? (
               <button
                 onClick={nextStep}
-                className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:from-purple-700 hover:to-blue-700 transition-all"
+                className="flex items-center gap-2 px-6 py-2.5 bg-slate-800 text-white rounded-xl font-medium hover:bg-slate-700 transition-all"
               >
                 Continue
                 <ChevronRight className="w-4 h-4" />
@@ -183,7 +223,7 @@ export default function OnboardingPage() {
               <button
                 onClick={handleComplete}
                 disabled={loading}
-                className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-medium hover:from-green-600 hover:to-emerald-600 transition-all disabled:opacity-50"
+                className="flex items-center gap-2 px-6 py-2.5 bg-slate-800 text-white rounded-xl font-medium hover:bg-slate-700 transition-all disabled:opacity-50"
               >
                 {loading ? (
                   <>
@@ -199,16 +239,24 @@ export default function OnboardingPage() {
               </button>
             )}
           </div>
-        </div>
+        </GlassCard>
 
         {/* Skip Option */}
         <button
           onClick={handleComplete}
-          className="w-full text-center text-white/60 text-sm mt-4 hover:text-white/80 transition-colors"
+          className="w-full text-center text-slate-400 text-sm mt-4 hover:text-slate-600 transition-colors"
         >
-          Skip for now - I'll set this up later
+          Skip for now
         </button>
       </div>
+
+      {/* Goal Modal */}
+      <AddGoalModal 
+        isOpen={showGoalModal}
+        onClose={() => setShowGoalModal(false)} 
+        onGoalCreated={handleGoalCreated}
+        userId={profile?.id || ''}
+      />
     </div>
   );
 }
@@ -224,44 +272,44 @@ function SleepScheduleStep({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <div className="inline-flex items-center justify-center w-12 h-12 bg-amber-100 rounded-full mb-3">
-          <Sun className="w-6 h-6 text-amber-600" />
+        <div className="inline-flex items-center justify-center w-12 h-12 bg-slate-100 rounded-full mb-3">
+          <Sun className="w-6 h-6 text-slate-600" />
         </div>
-        <h2 className="text-xl font-bold text-gray-900">Your daily rhythm</h2>
-        <p className="text-gray-500 mt-1">When do you typically wake up and go to sleep?</p>
+        <h2 className="text-xl font-bold text-slate-700">Your daily rhythm</h2>
+        <p className="text-slate-400 mt-1">When do you typically wake up and go to sleep?</p>
       </div>
 
       <div className="space-y-4">
         {/* Wake Time */}
-        <div className="bg-amber-50 rounded-2xl p-4">
+        <div className="bg-white/50 rounded-2xl p-4 border border-white/80">
           <div className="flex items-center gap-3 mb-3">
-            <Sun className="w-5 h-5 text-amber-600" />
-            <span className="font-medium text-gray-900">Wake up time</span>
+            <Sun className="w-5 h-5 text-slate-500" />
+            <span className="font-medium text-slate-700">Wake up time</span>
           </div>
           <input
             type="time"
             value={data.wake_time}
             onChange={(e) => updateData({ wake_time: e.target.value })}
-            className="w-full px-4 py-3 bg-white border border-amber-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 text-gray-800 text-lg"
+            className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700 text-lg"
           />
         </div>
 
         {/* Sleep Time */}
-        <div className="bg-indigo-50 rounded-2xl p-4">
+        <div className="bg-white/50 rounded-2xl p-4 border border-white/80">
           <div className="flex items-center gap-3 mb-3">
-            <Moon className="w-5 h-5 text-indigo-600" />
-            <span className="font-medium text-gray-900">Bedtime</span>
+            <Moon className="w-5 h-5 text-slate-500" />
+            <span className="font-medium text-slate-700">Bedtime</span>
           </div>
           <input
             type="time"
             value={data.sleep_time}
             onChange={(e) => updateData({ sleep_time: e.target.value })}
-            className="w-full px-4 py-3 bg-white border border-indigo-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-800 text-lg"
+            className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700 text-lg"
           />
         </div>
       </div>
 
-      <p className="text-sm text-gray-400 text-center">
+      <p className="text-sm text-slate-400 text-center">
         We'll avoid scheduling anything during your sleep hours
       </p>
     </div>
@@ -286,11 +334,11 @@ function WorkScheduleStep({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <div className="inline-flex items-center justify-center w-12 h-12 bg-blue-100 rounded-full mb-3">
-          <Briefcase className="w-6 h-6 text-blue-600" />
+        <div className="inline-flex items-center justify-center w-12 h-12 bg-slate-100 rounded-full mb-3">
+          <Briefcase className="w-6 h-6 text-slate-600" />
         </div>
-        <h2 className="text-xl font-bold text-gray-900">Work schedule</h2>
-        <p className="text-gray-500 mt-1">Do you have regular work hours?</p>
+        <h2 className="text-xl font-bold text-slate-700">Work schedule</h2>
+        <p className="text-slate-400 mt-1">Do you have regular work hours?</p>
       </div>
 
       {/* Toggle */}
@@ -299,8 +347,8 @@ function WorkScheduleStep({
           onClick={() => updateData({ works: true })}
           className={`flex-1 py-3 rounded-xl font-medium transition-all ${
             data.works 
-              ? 'bg-blue-500 text-white' 
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              ? 'bg-slate-800 text-white' 
+              : 'bg-white/50 text-slate-500 hover:bg-white/70 border border-white/80'
           }`}
         >
           Yes
@@ -309,8 +357,8 @@ function WorkScheduleStep({
           onClick={() => updateData({ works: false })}
           className={`flex-1 py-3 rounded-xl font-medium transition-all ${
             !data.works 
-              ? 'bg-blue-500 text-white' 
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              ? 'bg-slate-800 text-white' 
+              : 'bg-white/50 text-slate-500 hover:bg-white/70 border border-white/80'
           }`}
         >
           No
@@ -321,7 +369,7 @@ function WorkScheduleStep({
         <div className="space-y-4 animate-in fade-in duration-200">
           {/* Work Days */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Work days</label>
+            <label className="block text-sm font-medium text-slate-600 mb-2">Work days</label>
             <div className="flex gap-2">
               {DAYS.map((day, i) => (
                 <button
@@ -329,8 +377,8 @@ function WorkScheduleStep({
                   onClick={() => toggleWorkDay(day)}
                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
                     data.work_days.includes(day)
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      ? 'bg-slate-800 text-white'
+                      : 'bg-white/50 text-slate-400 hover:bg-white/70 border border-white/80'
                   }`}
                 >
                   {DAY_LABELS[i]}
@@ -342,21 +390,21 @@ function WorkScheduleStep({
           {/* Work Hours */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Start time</label>
+              <label className="block text-sm font-medium text-slate-600 mb-2">Start time</label>
               <input
                 type="time"
                 value={data.work_start}
                 onChange={(e) => updateData({ work_start: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
+                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">End time</label>
+              <label className="block text-sm font-medium text-slate-600 mb-2">End time</label>
               <input
                 type="time"
                 value={data.work_end}
                 onChange={(e) => updateData({ work_end: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
+                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
               />
             </div>
           </div>
@@ -377,11 +425,11 @@ function CommuteStep({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <div className="inline-flex items-center justify-center w-12 h-12 bg-orange-100 rounded-full mb-3">
-          <Car className="w-6 h-6 text-orange-600" />
+        <div className="inline-flex items-center justify-center w-12 h-12 bg-slate-100 rounded-full mb-3">
+          <Car className="w-6 h-6 text-slate-600" />
         </div>
-        <h2 className="text-xl font-bold text-gray-900">Commute</h2>
-        <p className="text-gray-500 mt-1">Do you commute to work?</p>
+        <h2 className="text-xl font-bold text-slate-700">Commute</h2>
+        <p className="text-slate-400 mt-1">Do you commute to work?</p>
       </div>
 
       {/* Toggle */}
@@ -390,8 +438,8 @@ function CommuteStep({
           onClick={() => updateData({ has_commute: true })}
           className={`flex-1 py-3 rounded-xl font-medium transition-all ${
             data.has_commute 
-              ? 'bg-orange-500 text-white' 
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              ? 'bg-slate-800 text-white' 
+              : 'bg-white/50 text-slate-500 hover:bg-white/70 border border-white/80'
           }`}
         >
           Yes
@@ -400,8 +448,8 @@ function CommuteStep({
           onClick={() => updateData({ has_commute: false })}
           className={`flex-1 py-3 rounded-xl font-medium transition-all ${
             !data.has_commute 
-              ? 'bg-orange-500 text-white' 
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              ? 'bg-slate-800 text-white' 
+              : 'bg-white/50 text-slate-500 hover:bg-white/70 border border-white/80'
           }`}
         >
           No / Remote
@@ -411,7 +459,7 @@ function CommuteStep({
       {data.has_commute && (
         <div className="space-y-4 animate-in fade-in duration-200">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-slate-600 mb-2">
               One-way commute time
             </label>
             <div className="flex items-center gap-3">
@@ -422,23 +470,23 @@ function CommuteStep({
                 step="5"
                 value={data.commute_mins}
                 onChange={(e) => updateData({ commute_mins: parseInt(e.target.value) })}
-                className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-600"
               />
-              <div className="w-20 text-center py-2 bg-orange-100 rounded-lg text-orange-700 font-medium">
+              <div className="w-20 text-center py-2 bg-slate-100 rounded-lg text-slate-700 font-medium">
                 {data.commute_mins} min
               </div>
             </div>
           </div>
 
-          <p className="text-sm text-gray-400 text-center">
+          <p className="text-sm text-slate-400 text-center">
             We'll block {data.commute_mins} minutes before and after work
           </p>
         </div>
       )}
 
       {!data.has_commute && (
-        <div className="bg-green-50 rounded-xl p-4 text-center">
-          <p className="text-green-700">
+        <div className="bg-white/50 rounded-xl p-4 text-center border border-white/80">
+          <p className="text-slate-600">
             Nice! Working from home gives you extra flexibility 🏠
           </p>
         </div>
@@ -482,27 +530,27 @@ function CommitmentsStep({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <div className="inline-flex items-center justify-center w-12 h-12 bg-purple-100 rounded-full mb-3">
-          <Calendar className="w-6 h-6 text-purple-600" />
+        <div className="inline-flex items-center justify-center w-12 h-12 bg-slate-100 rounded-full mb-3">
+          <Calendar className="w-6 h-6 text-slate-600" />
         </div>
-        <h2 className="text-xl font-bold text-gray-900">Fixed commitments</h2>
-        <p className="text-gray-500 mt-1">Any regular weekly events?</p>
+        <h2 className="text-xl font-bold text-slate-700">Fixed commitments</h2>
+        <p className="text-slate-400 mt-1">Any regular weekly events?</p>
       </div>
 
       {/* Existing Commitments */}
       {data.commitments.length > 0 && (
         <div className="space-y-2">
           {data.commitments.map((c, i) => (
-            <div key={i} className="flex items-center gap-3 bg-gray-50 rounded-xl p-3">
+            <div key={i} className="flex items-center gap-3 bg-white/50 rounded-xl p-3 border border-white/80">
               <div className="flex-1">
-                <div className="font-medium text-gray-900">{c.name}</div>
-                <div className="text-sm text-gray-500 capitalize">
+                <div className="font-medium text-slate-700">{c.name}</div>
+                <div className="text-sm text-slate-400 capitalize">
                   {c.day} · {c.start} - {c.end}
                 </div>
               </div>
               <button
                 onClick={() => removeCommitment(i)}
-                className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -513,13 +561,13 @@ function CommitmentsStep({
 
       {/* Add Form */}
       {showAdd ? (
-        <div className="bg-purple-50 rounded-2xl p-4 space-y-3 animate-in fade-in duration-200">
+        <div className="bg-white/50 rounded-2xl p-4 space-y-3 animate-in fade-in duration-200 border border-white/80">
           <input
             type="text"
             value={newCommitment.name}
             onChange={(e) => setNewCommitment(prev => ({ ...prev, name: e.target.value }))}
             placeholder="e.g., Football training, Therapy, Date night"
-            className="w-full px-4 py-2.5 border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-800"
+            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
             autoFocus
           />
           
@@ -527,7 +575,7 @@ function CommitmentsStep({
             <select
               value={newCommitment.day}
               onChange={(e) => setNewCommitment(prev => ({ ...prev, day: e.target.value }))}
-              className="px-3 py-2.5 border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-800 capitalize"
+              className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700 capitalize"
             >
               {DAYS.map(day => (
                 <option key={day} value={day} className="capitalize">{day}</option>
@@ -537,27 +585,27 @@ function CommitmentsStep({
               type="time"
               value={newCommitment.start}
               onChange={(e) => setNewCommitment(prev => ({ ...prev, start: e.target.value }))}
-              className="px-3 py-2.5 border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-800"
+              className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
             />
             <input
               type="time"
               value={newCommitment.end}
               onChange={(e) => setNewCommitment(prev => ({ ...prev, end: e.target.value }))}
-              className="px-3 py-2.5 border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-800"
+              className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
             />
           </div>
 
           <div className="flex gap-2">
             <button
               onClick={() => setShowAdd(false)}
-              className="flex-1 py-2 text-gray-600 hover:bg-gray-100 rounded-xl font-medium"
+              className="flex-1 py-2 text-slate-500 hover:bg-white/50 rounded-xl font-medium"
             >
               Cancel
             </button>
             <button
               onClick={addCommitment}
               disabled={!newCommitment.name.trim()}
-              className="flex-1 py-2 bg-purple-500 text-white rounded-xl font-medium hover:bg-purple-600 disabled:opacity-50"
+              className="flex-1 py-2 bg-slate-800 text-white rounded-xl font-medium hover:bg-slate-700 disabled:opacity-50"
             >
               Add
             </button>
@@ -566,7 +614,7 @@ function CommitmentsStep({
       ) : (
         <button
           onClick={() => setShowAdd(true)}
-          className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-purple-400 hover:text-purple-600 hover:bg-purple-50 transition-all flex items-center justify-center gap-2"
+          className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-slate-400 hover:border-slate-400 hover:text-slate-600 hover:bg-white/30 transition-all flex items-center justify-center gap-2"
         >
           <Plus className="w-5 h-5" />
           Add commitment
@@ -574,10 +622,47 @@ function CommitmentsStep({
       )}
 
       {data.commitments.length === 0 && !showAdd && (
-        <p className="text-sm text-gray-400 text-center">
+        <p className="text-sm text-slate-400 text-center">
           Things like gym classes, therapy sessions, or weekly socials
         </p>
       )}
+    </div>
+  );
+}
+
+// Step 5: First Goal
+function FirstGoalStep({ onOpenModal }: { onOpenModal: () => void }) {
+  return (
+    <div className="space-y-6">
+      <div className="text-center">
+        <div className="inline-flex items-center justify-center w-16 h-16 bg-slate-100 rounded-2xl mb-4">
+          <Sparkles className="w-8 h-8 text-slate-600" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-700">What's your first summit?</h2>
+        <p className="text-slate-400 mt-1">Set your first goal and we'll help you reach it</p>
+      </div>
+
+      <button
+        onClick={onOpenModal}
+        className="w-full p-5 bg-white/50 border-2 border-dashed border-slate-300 rounded-2xl hover:border-slate-400 hover:bg-white/70 transition-all group"
+      >
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-slate-100 rounded-xl group-hover:bg-slate-200 transition-colors">
+            <Target className="w-6 h-6 text-slate-600" />
+          </div>
+          <div className="flex-1 text-left">
+            <p className="font-semibold text-slate-700">Add your first goal</p>
+            <p className="text-sm text-slate-400">e.g., Run a marathon, Learn Spanish, Lose 10kg</p>
+          </div>
+          <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-slate-600 transition-colors" />
+        </div>
+      </button>
+
+      <div className="bg-white/50 rounded-xl p-4 border border-white/80">
+        <p className="text-sm text-slate-500 text-center">
+          💡 You can also add goals later from the Goals page
+        </p>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Hardcoded production backend URL - bypasses Next.js rewrites
-const API_BASE_URL = 'https://pepzi-backend-1029121217006.europe-west2.run.app';
+const API_BASE_URL = 'https://pepzi-backend-1029121217006.europe-west1.run.app';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -212,7 +212,6 @@ export const chatAPI = {
     const response = await api.get(`/api/chat/goal-progress/${goalId}`);
     return response.data;
   },
-  // NEW: Get missed sessions for nudges
   getMissedSessions: async (userId: string): Promise<{ sessions: TodayTask[] }> => {
     const response = await api.get('/api/chat/missed-sessions', { params: { user_id: userId } });
     return response.data;
@@ -266,17 +265,14 @@ export const goalsAPI = {
     const response = await api.get('/api/goals/all-progress', { params: { user_id: userId } });
     return response.data;
   },
-  // NEW: Update goal intensity
   updateIntensity: async (goalId: string, intensity: string): Promise<any> => {
     const response = await api.patch(`/api/goals/${goalId}/intensity`, { intensity });
     return response.data;
   },
-  // NEW: Update goal preferences (days, hours, sessions)
   updatePreferences: async (goalId: string, data: { preferred_days?: string[]; weekly_hours?: number; sessions_per_week?: number }): Promise<any> => {
     const response = await api.patch(`/api/goals/${goalId}/preferences`, data);
     return response.data;
   },
-  // NEW: Get intensify preview (before/after comparison)
   getIntensifyPreview: async (goalId: string): Promise<{
     success: boolean;
     preview: Array<{
@@ -290,8 +286,6 @@ export const goalsAPI = {
     const response = await api.post(`/api/goals/${goalId}/intensify-preview`);
     return response.data;
   },
-
-  // NEW: Apply intensified sessions
   applyIntensify: async (goalId: string, preview: any[]): Promise<{
     success: boolean;
     sessions_updated: number;
@@ -300,8 +294,6 @@ export const goalsAPI = {
     const response = await api.post(`/api/goals/${goalId}/intensify-apply`, { preview });
     return response.data;
   },
-
-  // NEW Phase 2: Get time budget (work, commute, events, training, free)
   getTimeBudget: async (userId: string): Promise<{
     work_hours: number;
     commute_hours: number;
@@ -314,8 +306,6 @@ export const goalsAPI = {
     const response = await api.get('/api/goals/time-budget', { params: { user_id: userId } });
     return response.data;
   },
-
-  // NEW Phase 2: Get full schedule for a goal (all sessions grouped by week)
   getGoalSchedule: async (goalId: string): Promise<{
     sessions: any[];
     sessions_by_week: Record<number, any[]>;
@@ -395,36 +385,22 @@ export const scheduleAPI = {
     const response = await api.patch(`/api/schedule/${blockId}/reschedule`, { new_start_time: newStartTime });
     return response.data.block;
   },
-
-  // ============================================================
-  // NEW PHASE 1 METHODS
-  // ============================================================
-
-  // Complete a block with notes only (simplified - no metrics)
   completeBlockWithNotes: async (blockId: string, notes: string): Promise<{ success: boolean; block: ScheduleBlock; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/complete-with-notes`, { notes });
     return response.data;
   },
-
-  // Skip a block (marks as skipped, calculates deadline impact)
   skipBlock: async (blockId: string): Promise<{ success: boolean; deadline_impact: string | null; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/skip`);
     return response.data;
   },
-
-  // Smart reschedule (later today, tomorrow, or custom time)
   rescheduleBlock: async (blockId: string, option: 'later_today' | 'tomorrow' | 'custom', customTime?: string): Promise<{ success: boolean; block: ScheduleBlock; new_time: string; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/reschedule-smart`, { option, custom_time: customTime });
     return response.data;
   },
-
-  // NEW Phase 2: Push block to next week (affects deadline)
   pushToNextWeek: async (blockId: string): Promise<{ success: boolean; new_date: string; deadline_impact: string | null; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/push-to-next-week`);
     return response.data;
   },
-
-  // NEW Phase 2: Complete block early (can pull deadline forward)
   completeEarly: async (blockId: string, notes: string): Promise<{ success: boolean; block: ScheduleBlock; deadline_impact: string | null; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/complete-early`, { notes });
     return response.data;
@@ -452,7 +428,6 @@ export const availabilityAPI = {
     const response = await api.get('/api/availability/feasibility', { params: { user_id: userId } });
     return response.data;
   },
-  // Alias for save (for consistency)
   update: async (userId: string, availability: any): Promise<any> => {
     const response = await api.post('/api/availability', { user_id: userId, ...availability });
     return response.data;
