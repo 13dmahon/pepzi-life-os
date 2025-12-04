@@ -594,7 +594,7 @@ function MobileAgendaView({
 }
 
 // ============================================================
-// DRAGGABLE BLOCK COMPONENT (Desktop) - UPDATED: Entire block draggable, no action buttons
+// DRAGGABLE BLOCK COMPONENT (Desktop)
 // ============================================================
 
 interface DraggableBlockProps {
@@ -616,6 +616,7 @@ function DraggableBlock({ block, top, height, onComplete, onDelete, onClick }: D
   });
 
   const isCompleted = block.status === 'completed';
+  const isUserBlock = block.created_by === 'user' || isBlockerType(block.type);
   const category = block.goals?.category || block.type;
   const styleClass = getBlockStyle(block.type, category, block.created_by);
 
@@ -640,7 +641,6 @@ function DraggableBlock({ block, top, height, onComplete, onDelete, onClick }: D
   return (
     <div
       ref={setNodeRef}
-      {...(isDraggable ? { ...attributes, ...listeners } : {})}
       className={`
         absolute left-1 right-1 rounded-lg border-2 px-2 py-1 overflow-hidden
         ${styleClass}
@@ -648,14 +648,22 @@ function DraggableBlock({ block, top, height, onComplete, onDelete, onClick }: D
         ${height < 40 ? 'text-xs' : 'text-sm'}
         ${isDragging ? 'opacity-50 shadow-2xl ring-2 ring-purple-500' : ''}
         ${isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
-        hover:shadow-lg hover:z-20 transition-shadow
+        hover:shadow-lg hover:z-20 transition-shadow group
       `}
       style={style}
       onClick={() => !isDragging && onClick?.(block)}
+      title={`${displayName}\n${startTime} · ${block.duration_mins}min${isDraggable ? '\n(Drag to reschedule)' : ''}`}
     >
       <div className="flex items-start gap-1 h-full">
         {isDraggable && (
-          <GripVertical className="w-3 h-3 opacity-40 flex-shrink-0 mt-0.5" />
+          <div
+            {...attributes}
+            {...listeners}
+            className="flex-shrink-0 cursor-grab active:cursor-grabbing p-0.5 -ml-1 hover:bg-black/10 rounded"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <GripVertical className="w-3 h-3 opacity-50" />
+          </div>
         )}
         
         {!isDraggable && getBlockIcon(block.type)}
@@ -669,8 +677,33 @@ function DraggableBlock({ block, top, height, onComplete, onDelete, onClick }: D
           )}
         </div>
 
-        {isCompleted && (
-          <Check className="w-4 h-4 text-green-600 flex-shrink-0" />
+        {!isUserBlock && (
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+            {!isCompleted && onComplete && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onComplete(block.id);
+                }}
+                className="p-1 bg-green-500 text-white rounded hover:bg-green-600"
+                title="Mark complete"
+              >
+                <Check className="w-3 h-3" />
+              </button>
+            )}
+            {onDelete && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(block.id);
+                }}
+                className="p-1 bg-red-500 text-white rounded hover:bg-red-600"
+                title="Delete"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

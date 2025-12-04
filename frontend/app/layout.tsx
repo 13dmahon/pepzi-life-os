@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import Providers from './providers';
 import { AuthProvider } from '@/lib/auth-context';
-import AuthNavigation from '@/components/AuthNavigation';
+import TopNav from '@/components/TopNav';
 import BottomNav from '@/components/BottomNav';
 
 export const metadata: Metadata = {
@@ -41,7 +41,7 @@ export default function RootLayout({
       <body className="font-sans antialiased min-h-screen bg-gray-50">
         <Providers>
           <AuthProvider>
-            <AuthNavigation />
+            <TopNav />
             {children}
             <BottomNav />
           </AuthProvider>

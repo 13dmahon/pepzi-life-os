@@ -1,198 +1,370 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import Link from 'next/link';
-import { scheduleAPI } from '@/lib/api';
-import { Calendar, Clock, Target, CheckCircle, Circle } from 'lucide-react';
-
-
-const USER_ID = '550e8400-e29b-41d4-a957-146664440000';
-
-type ScheduleBlock = {
-  id: string;
-  type: string;
-  scheduled_start: string;
-  duration_mins: number;
-  status: string;
-  notes?: string;
-  goals?: { name: string };
-};
+import { useState, useMemo } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { scheduleAPI, availabilityAPI, goalsAPI } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import {
+  format,
+  startOfMonth,
+  endOfMonth,
+  startOfWeek,
+  differenceInCalendarWeeks,
+} from 'date-fns';
+import {
+  Calendar,
+  LayoutGrid,
+  List,
+  Clock as ClockIcon,
+  RefreshCw,
+  CheckCircle,
+  AlertCircle,
+  AlertTriangle,
+  CalendarDays,
+  CalendarRange,
+} from 'lucide-react';
+import WeeklyScheduleBoard from '@/components/schedule/WeeklyScheduleBoard';
+import HourlyCalendar from '@/components/schedule/HourlyCalendar';
+import MonthCalendar from '@/components/schedule/MonthCalendar';
+import YearTimeline from '@/components/schedule/YearTimeline';
 
 export default function SchedulePage() {
-  const { data: scheduleData, isLoading } = useQuery({
-    queryKey: ['schedule', USER_ID],
-    queryFn: () => {
-      const today = new Date();
-      const startOfWeek = new Date(today);
-      startOfWeek.setDate(today.getDate() - today.getDay());
+  const { user } = useAuth();
+  const userId = user?.id || '';
+  const queryClient = useQueryClient();
+  
+  // View state
+  const [viewMode, setViewMode] = useState<'week' | 'month' | 'year'>('week');
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [monthDate, setMonthDate] = useState(new Date());
+  const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+  const [scheduleWarning, setScheduleWarning] = useState<string | null>(null);
 
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(startOfWeek.getDate() + 7);
+  // Calculate date ranges for different views
+  const today = new Date();
+  
+  // Week view dates
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() - today.getDay() + weekOffset * 7);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 7);
 
-      return scheduleAPI.getSchedule(
-        USER_ID,
-        startOfWeek.toISOString().split('T')[0],
-        endOfWeek.toISOString().split('T')[0]
-      );
+  // Month view dates
+  const monthStart = startOfMonth(monthDate);
+  const monthEnd = endOfMonth(monthDate);
+
+  // Fetch schedule for WEEK view (wider range for mobile agenda scrolling)
+  const {
+    data: weekBlocks = [],
+    isLoading: isLoadingWeek,
+    refetch: refetchWeek,
+  } = useQuery({
+    queryKey: ['schedule', userId, 'week-extended'],
+    queryFn: async () => {
+      // Fetch from 4 weeks ago to 16 weeks ahead for mobile scrolling
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 28); // 4 weeks back
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + 112); // 16 weeks ahead
+      
+      const startStr = format(startDate, 'yyyy-MM-dd');
+      const endStr = format(endDate, 'yyyy-MM-dd');
+      const response = await scheduleAPI.getBlocks(userId, startStr, endStr);
+      return response.blocks || response;
+    },
+    enabled: viewMode === 'week',
+  });
+
+  // Fetch schedule for MONTH view
+  const {
+    data: monthBlocks = [],
+    isLoading: isLoadingMonth,
+  } = useQuery({
+    queryKey: ['schedule', userId, 'month', format(monthDate, 'yyyy-MM')],
+    queryFn: async () => {
+      // Fetch blocks for the entire month
+      const startStr = format(monthStart, 'yyyy-MM-dd');
+      const endStr = format(monthEnd, 'yyyy-MM-dd');
+      const response = await scheduleAPI.getBlocks(userId, startStr, endStr);
+      return response.blocks || response;
+    },
+    enabled: viewMode === 'month',
+  });
+
+  // Fetch goals for YEAR view
+  const {
+    data: goalsData,
+    isLoading: isLoadingGoals,
+  } = useQuery({
+    queryKey: ['goals', userId, 'year'],
+    queryFn: () => goalsAPI.getGoals(userId),
+    enabled: viewMode === 'year',
+  });
+
+  // Fetch availability (used for week view)
+  const { data: availabilityData } = useQuery({
+    queryKey: ['availability', userId],
+    queryFn: () => availabilityAPI.get(userId),
+    enabled: viewMode === 'week',
+  });
+
+  // Auto-generate mutation
+  const generateMutation = useMutation({
+    mutationFn: () => scheduleAPI.autoGenerate(userId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['schedule'] });
+      
+      if (data.warning) {
+        setScheduleWarning(data.warning);
+      } else {
+        setScheduleWarning(null);
+        alert(`✅ ${data.message}`);
+      }
+    },
+    onError: (error: any) => {
+      alert(`❌ ${error.response?.data?.message || 'Failed to generate schedule'}`);
     },
   });
 
-  const blocks: ScheduleBlock[] = scheduleData || [];
+  // Get current blocks based on view
+  const currentBlocks = viewMode === 'week' ? weekBlocks : viewMode === 'month' ? monthBlocks : [];
+  const isLoading = viewMode === 'week' ? isLoadingWeek : viewMode === 'month' ? isLoadingMonth : isLoadingGoals;
 
-  // Group blocks by day
-  const blocksByDay: Record<string, ScheduleBlock[]> = {};
-  blocks.forEach((block) => {
-    const date = new Date(block.scheduled_start).toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'short',
-      day: 'numeric',
-    });
-    if (!blocksByDay[date]) {
-      blocksByDay[date] = [];
-    }
-    blocksByDay[date].push(block);
-  });
+  // Stats (for week view)
+  const stats = useMemo(() => {
+    const blocks = viewMode === 'week' ? weekBlocks : monthBlocks;
+    const trainingBlocks = blocks.filter((b) => !['work', 'commute', 'event', 'sleep'].includes(b.type));
+    const completedBlocks = trainingBlocks.filter((b) => b.status === 'completed').length;
+    const totalHours = Math.round(trainingBlocks.reduce((sum, b) => sum + b.duration_mins, 0) / 60);
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50 p-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="animate-pulse">
-            <div className="h-8 bg-gray-200 rounded w-1/4 mb-8" />
-            <div className="space-y-4">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-32 bg-gray-200 rounded-2xl" />
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+    return {
+      total: trainingBlocks.length,
+      completed: completedBlocks,
+      totalHours,
+      remaining: trainingBlocks.length - completedBlocks,
+    };
+  }, [weekBlocks, monthBlocks, viewMode]);
+
+  // Handle clicking a day in month view -> navigate to week view
+  const handleDayClick = (date: Date) => {
+    const clickedWeekStart = startOfWeek(date, { weekStartsOn: 0 });
+    const currentWeekStart = startOfWeek(today, { weekStartsOn: 0 });
+    const weekDiff = differenceInCalendarWeeks(clickedWeekStart, currentWeekStart, { weekStartsOn: 0 });
+    
+    setWeekOffset(weekDiff);
+    setViewMode('week');
+  };
+
+  // Handle clicking a goal in year view -> navigate to goals page
+  const handleGoalClick = (goalId: string) => {
+    window.location.href = `/goals?highlight=${goalId}`;
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50 p-8 pb-24 md:pb-8">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50 p-4 md:p-8 pb-24 md:pb-8 md:pt-20">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">📅 Your Schedule</h1>
-          <p className="text-gray-600">
-            Your automatically generated training schedule for this week
-          </p>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
+              📅 {viewMode === 'week' ? 'Weekly' : viewMode === 'month' ? 'Monthly' : 'Yearly'} Schedule
+            </h1>
+            <p className="text-gray-600">
+              {viewMode === 'week' && 'Your training sessions around work & commitments'}
+              {viewMode === 'month' && 'Overview of your training month'}
+              {viewMode === 'year' && 'Your goal timeline and progress'}
+            </p>
+          </div>
+
+          <div className="flex gap-3 flex-wrap">
+            {/* View Toggle - Week/Month/Year */}
+            <div className="flex bg-white rounded-full border border-gray-200 p-1">
+              <button
+                onClick={() => setViewMode('week')}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors flex items-center gap-2 ${
+                  viewMode === 'week'
+                    ? 'bg-purple-500 text-white'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <ClockIcon className="w-4 h-4" />
+                Week
+              </button>
+              <button
+                onClick={() => setViewMode('month')}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors flex items-center gap-2 ${
+                  viewMode === 'month'
+                    ? 'bg-purple-500 text-white'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <CalendarDays className="w-4 h-4" />
+                Month
+              </button>
+              <button
+                onClick={() => setViewMode('year')}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors flex items-center gap-2 ${
+                  viewMode === 'year'
+                    ? 'bg-purple-500 text-white'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <CalendarRange className="w-4 h-4" />
+                Year
+              </button>
+            </div>
+
+            {/* Regenerate Button - only show for week view */}
+            {viewMode === 'week' && (
+              <button
+                onClick={() => {
+                  if (window.confirm('This will regenerate ALL training sessions for the current week. Any manual changes will be lost. Continue?')) {
+                    generateMutation.mutate();
+                  }
+                }}
+                disabled={generateMutation.isPending}
+                className="px-6 py-2 bg-white border border-gray-200 text-gray-600 rounded-full font-medium hover:bg-gray-50 transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={`w-4 h-4 ${generateMutation.isPending ? 'animate-spin' : ''}`}
+                />
+                {generateMutation.isPending ? 'Regenerating...' : 'Regenerate Week'}
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
-                <Calendar className="w-6 h-6 text-purple-600" />
-              </div>
-              <div>
-                <div className="text-3xl font-bold text-gray-900">{blocks.length}</div>
-                <div className="text-sm text-gray-600">Sessions This Week</div>
-              </div>
+        {/* Warning Banner */}
+        {scheduleWarning && (
+          <div className="mb-6 bg-amber-50 border-2 border-amber-200 rounded-xl p-4 flex items-start gap-3">
+            <AlertTriangle className="w-6 h-6 text-amber-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-bold text-amber-800">Scheduling Conflict</h3>
+              <p className="text-amber-700 text-sm">{scheduleWarning}</p>
+              <p className="text-amber-600 text-xs mt-2">
+                Consider: Reducing goal hours, extending timelines, or freeing up more time in your schedule.
+              </p>
             </div>
+            <button
+              onClick={() => setScheduleWarning(null)}
+              className="ml-auto text-amber-500 hover:text-amber-700"
+            >
+              ✕
+            </button>
           </div>
+        )}
 
-          <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-                <CheckCircle className="w-6 h-6 text-green-600" />
-              </div>
-              <div>
-                <div className="text-3xl font-bold text-gray-900">
-                  {blocks.filter((b) => b.status === 'completed').length}
+        {/* Stats Cards - show for week and month views */}
+        {(viewMode === 'week' || viewMode === 'month') && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                  <Calendar className="w-5 h-5 text-purple-600" />
                 </div>
-                <div className="text-sm text-gray-600">Completed</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-                <Clock className="w-6 h-6 text-blue-600" />
-              </div>
-              <div>
-                <div className="text-3xl font-bold text-gray-900">
-                  {Math.round(
-                    blocks.reduce((sum, b) => sum + b.duration_mins, 0) / 60
-                  )}
-                  h
+                <div>
+                  <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
+                  <div className="text-xs text-gray-500">Sessions</div>
                 </div>
-                <div className="text-sm text-gray-600">Total Hours</div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-gray-900">{stats.completed}</div>
+                  <div className="text-xs text-gray-500">Completed</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <ClockIcon className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-gray-900">{stats.totalHours}h</div>
+                  <div className="text-xs text-gray-500">Total Time</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+                  <AlertCircle className="w-5 h-5 text-orange-600" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-gray-900">{stats.remaining}</div>
+                  <div className="text-xs text-gray-500">Remaining</div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Schedule by Day */}
-        <div className="space-y-6">
-          {Object.keys(blocksByDay).length === 0 && (
+        {/* Main Content */}
+        {isLoading ? (
+          <div className="bg-white rounded-2xl p-12 shadow-lg border border-gray-100 text-center">
+            <div className="inline-block w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-4" />
+            <p className="text-gray-500">Loading schedule...</p>
+          </div>
+        ) : viewMode === 'week' ? (
+          // WEEK VIEW
+          weekBlocks.length === 0 ? (
             <div className="bg-white rounded-2xl p-12 shadow-lg border border-gray-100 text-center">
               <Calendar className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-xl font-bold text-gray-900 mb-2">No Schedule Yet</h3>
-              <p className="text-gray-600 mb-6">
-                Generate your weekly schedule from the Goals page to see your training
-                blocks here.
+              <h3 className="text-xl font-bold text-gray-900 mb-2">No Sessions This Week</h3>
+              <p className="text-gray-600 mb-2">
+                Training sessions are automatically scheduled when you create goals with training plans.
               </p>
-
-              <Link
-                href="/goals"
-                className="inline-block px-6 py-3 bg-purple-600 text-white rounded-full font-medium hover:bg-purple-700 transition-colors"
+              <p className="text-gray-500 text-sm mb-6">
+                Go to Goals → Add a goal → The schedule will appear here!
+              </p>
+              <button
+                onClick={() => window.location.href = '/goals'}
+                className="px-8 py-3 bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-full font-medium hover:shadow-lg transition-all"
               >
-                Go to Goals
-              </Link>
+                🎯 Add Your First Goal
+              </button>
             </div>
-          )}
+          ) : (
+            <HourlyCalendar
+              blocks={weekBlocks}
+              availability={availabilityData?.availability}
+              userId={userId}
+              onBlockUpdate={() => refetchWeek()}
+              weekOffset={weekOffset}
+              setWeekOffset={setWeekOffset}
+            />
+          )
+        ) : viewMode === 'month' ? (
+          // MONTH VIEW
+          <MonthCalendar
+            blocks={monthBlocks}
+            currentDate={monthDate}
+            onDateChange={setMonthDate}
+            onDayClick={handleDayClick}
+          />
+        ) : (
+          // YEAR VIEW
+          <YearTimeline
+            goals={goalsData || []}
+            currentYear={currentYear}
+            onYearChange={setCurrentYear}
+            onGoalClick={handleGoalClick}
+          />
+        )}
 
-          {Object.entries(blocksByDay).map(([day, dayBlocks]) => (
-            <div
-              key={day}
-              className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100"
-            >
-              <h2 className="text-xl font-bold text-gray-900 mb-4">{day}</h2>
-              <div className="space-y-3">
-                {dayBlocks.map((block) => (
-                  <div
-                    key={block.id}
-                    className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
-                  >
-                    <div className="flex-shrink-0">
-                      {block.status === 'completed' ? (
-                        <CheckCircle className="w-6 h-6 text-green-500" />
-                      ) : (
-                        <Circle className="w-6 h-6 text-gray-300" />
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-1">
-                        <span className="text-sm font-medium text-gray-600">
-                          {new Date(block.scheduled_start).toLocaleTimeString('en-US', {
-                            hour: 'numeric',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                        <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                          {block.duration_mins} min
-                        </span>
-                      </div>
-                      <div className="font-medium text-gray-900">
-                        {block.notes || block.type}
-                      </div>
-                      {block.goals && (
-                        <div className="text-sm text-gray-600 mt-1">
-                          <Target className="w-4 h-4 inline mr-1" />
-                          {block.goals.name}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
+        {/* Help Text */}
+        <div className="mt-6 text-center text-sm text-gray-500">
+          {viewMode === 'week' && '💡 Tip: Drag training blocks to move them. Add work/events with "Add Block" - training will schedule around them automatically.'}
+          {viewMode === 'month' && '💡 Tip: Click any day to view that week\'s detailed schedule.'}
+          {viewMode === 'year' && '💡 Tip: See your entire goal timeline. Click a goal to view its details.'}
         </div>
       </div>
     </div>

@@ -32,7 +32,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const PUBLIC_ROUTES = ['/login', '/signup', '/auth/callback', '/forgot-password'];
+// Added '/' to public routes so landing page is visible to logged-out users
+const PUBLIC_ROUTES = ['/', '/login', '/signup', '/auth/callback', '/forgot-password'];
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -115,7 +116,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (loading) return;
 
-    const isPublicRoute = PUBLIC_ROUTES.some(route => pathname?.startsWith(route));
+    const isPublicRoute = PUBLIC_ROUTES.some(route => 
+      route === '/' ? pathname === '/' : pathname?.startsWith(route)
+    );
 
     if (!user && !isPublicRoute) {
       router.push('/login');
