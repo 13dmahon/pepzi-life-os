@@ -5,25 +5,14 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    // Persist session in localStorage (survives browser close)
     persistSession: true,
-    // Use localStorage instead of sessionStorage
-    storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-    // Auto-refresh token before it expires
     autoRefreshToken: true,
-    // Detect session from URL (for OAuth redirects)
-    detectSessionInUrl: true,
-    // Flow type for better mobile support
-    flowType: 'pkce',
   },
 });
 
-// Auth helper functions
+// Optional helpers
 export const signUp = async (email: string, password: string) => {
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-  });
+  const { data, error } = await supabase.auth.signUp({ email, password });
   return { data, error };
 };
 
@@ -50,12 +39,12 @@ export const getUser = async () => {
   return { user: data.user, error };
 };
 
-// Google OAuth (optional - for later)
 export const signInWithGoogle = async () => {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
+      // Always use canonical www URL to avoid redirect mismatch
+      redirectTo: 'https://www.pepzi.io/auth/callback',
     },
   });
   return { data, error };

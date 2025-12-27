@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useState, useRef, useEffect } from 'react';
 import { Home, Calendar, Target, MessageCircle, Settings, LogOut, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useNavigation } from '@/components/NavigationContext';
 
 const navItems = [
   { href: '/', icon: Home, label: 'Home' },
@@ -16,6 +17,7 @@ const navItems = [
 export default function TopNav() {
   const pathname = usePathname();
   const { user, profile, signOut } = useAuth();
+  const { isNavHidden } = useNavigation();
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -29,7 +31,8 @@ export default function TopNav() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  if (!user || pathname?.startsWith('/login') || pathname?.startsWith('/signup') || pathname?.startsWith('/onboarding')) {
+  // Hide nav when modal is open or on auth pages
+  if (isNavHidden || !user || pathname?.startsWith('/login') || pathname?.startsWith('/signup') || pathname?.startsWith('/onboarding')) {
     return null;
   }
 

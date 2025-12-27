@@ -44,6 +44,7 @@ const TRACKING_METRICS: Record<string, {
 
 /**
  * Get today's schedule blocks for a user
+ * 🆕 Now includes resource_link and resource_link_label from goals
  */
 async function getTodayBlocks(userId: string) {
   const today = new Date().toISOString().split('T')[0];
@@ -52,7 +53,7 @@ async function getTodayBlocks(userId: string) {
     .from('schedule_blocks')
     .select(`
       *,
-      goals (id, name, category, plan)
+      goals (id, name, category, plan, resource_link, resource_link_label)
     `)
     .eq('user_id', userId)
     .gte('scheduled_start', `${today}T00:00:00`)
@@ -418,6 +419,7 @@ router.post('/confirm-log', async (req: Request, res: Response) => {
 /**
  * GET /api/chat/today-summary
  * Get summary of today's tasks with tracking requirements
+ * 🆕 Now includes resource_link and resource_link_label from goals
  */
 router.get('/today-summary', async (req: Request, res: Response) => {
   try {
@@ -446,6 +448,9 @@ router.get('/today-summary', async (req: Request, res: Response) => {
         status: block.status,
         completed_at: block.completed_at,
         tracked_data: block.tracked_data,
+        // 🆕 Include resource link from the goal
+        resource_link: block.goals?.resource_link || null,
+        resource_link_label: block.goals?.resource_link_label || null,
         tracking_requirements: tracking.map(metric => {
           const metricDef = TRACKING_METRICS[metric];
           if (metricDef) {
@@ -503,6 +508,67 @@ router.get('/goal-progress/:goalId', async (req: Request, res: Response) => {
     console.error('❌ Goal progress error:', error);
     return res.status(500).json({
       error: 'Failed to get progress',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/chat/missed-sessions
+ * Get overdue/missed sessions from past days
+ * 🆕 Includes resource_link and resource_link_label
+ */
+router.get('/missed-sessions', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'Missing user_id' });
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Get scheduled blocks from the past 7 days that weren't completed
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+
+    const { data: missedBlocks, error } = await supabase
+      .from('schedule_blocks')
+      .select('*, goals(name, category, resource_link, resource_link_label)')
+      .eq('user_id', user_id)
+      .eq('status', 'scheduled')
+      .gte('scheduled_start', weekAgo.toISOString())
+      .lt('scheduled_start', today.toISOString())
+      .order('scheduled_start', { ascending: false });
+
+    if (error) throw error;
+
+    const sessions = (missedBlocks || []).map(block => {
+      const { name, description, tip } = parseSessionNotes(block.notes);
+      return {
+        id: block.id,
+        name,
+        description,
+        tip,
+        goal_name: block.goals?.name || 'General',
+        goal_id: block.goal_id,
+        category: block.goals?.category,
+        scheduled_time: block.scheduled_start,
+        duration_mins: block.duration_mins,
+        status: block.status,
+        // 🆕 Include resource link from the goal
+        resource_link: block.goals?.resource_link || null,
+        resource_link_label: block.goals?.resource_link_label || null,
+      };
+    });
+
+    return res.json({ sessions });
+
+  } catch (error: any) {
+    console.error('❌ Missed sessions error:', error);
+    return res.status(500).json({
+      error: 'Failed to get missed sessions',
       message: error.message,
     });
   }

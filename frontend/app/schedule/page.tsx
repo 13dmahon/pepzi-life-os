@@ -18,10 +18,20 @@ import {
   ChevronDown,
   ChevronUp,
   X,
+  Loader2,
+  Target,
 } from 'lucide-react';
 import HourlyCalendar from '@/components/schedule/HourlyCalendar';
 import MonthCalendar from '@/components/schedule/MonthCalendar';
 import YearTimeline from '@/components/schedule/YearTimeline';
+import {
+  GlassCard,
+  GlassButton,
+  GlassTabs,
+  GlassStat,
+  GlassIconBox,
+  WallpaperBackground,
+} from '@/components/ui/GlassUI';
 
 export default function SchedulePage() {
   const { user } = useAuth();
@@ -121,141 +131,130 @@ export default function SchedulePage() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50 md:pt-16 pb-16 md:pb-0 overflow-hidden">
-      {/* Compact Header Bar */}
-      <div className="flex-shrink-0 bg-white border-b border-gray-200 px-4 py-2">
-        <div className="flex items-center justify-between gap-2">
-          {/* View Toggle */}
-          <div className="flex bg-gray-100 rounded-lg p-0.5">
-            <button
-              onClick={() => setViewMode('week')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                viewMode === 'week' ? 'bg-white shadow text-purple-700' : 'text-gray-600'
-              }`}
-            >
-              Week
-            </button>
-            <button
-              onClick={() => setViewMode('month')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                viewMode === 'month' ? 'bg-white shadow text-purple-700' : 'text-gray-600'
-              }`}
-            >
-              Month
-            </button>
-            <button
-              onClick={() => setViewMode('year')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                viewMode === 'year' ? 'bg-white shadow text-purple-700' : 'text-gray-600'
-              }`}
-            >
-              Year
-            </button>
-          </div>
+    <WallpaperBackground>
+      <div className="h-screen flex flex-col md:pt-16 pb-16 md:pb-0 overflow-hidden">
+        
+        {/* Header Bar */}
+        <div className="flex-shrink-0 px-4 py-3">
+          <GlassCard className="p-2" hover={false}>
+            <div className="flex items-center justify-between gap-2">
+              
+              {/* View Toggle */}
+              <GlassTabs
+                tabs={[
+                  { id: 'week', label: 'Week' },
+                  { id: 'month', label: 'Month' },
+                  { id: 'year', label: 'Year' },
+                ]}
+                activeTab={viewMode}
+                onChange={(tab) => setViewMode(tab as 'week' | 'month' | 'year')}
+                className="border-0 bg-transparent p-0"
+              />
 
-          {/* Stats Button */}
-          <button
-            onClick={() => setShowStats(!showStats)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm"
-          >
-            <span className="text-green-600 font-medium">{stats.completed}/{stats.total}</span>
-            <span className="text-gray-400">•</span>
-            <span className="text-gray-600">{stats.totalHours}h</span>
-            {showStats ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
+              {/* Stats Toggle */}
+              <button
+                onClick={() => setShowStats(!showStats)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white/40 hover:bg-white/60 rounded-xl text-sm transition-all"
+              >
+                <span className="text-emerald-600 font-medium">{stats.completed}/{stats.total}</span>
+                <span className="text-slate-300">•</span>
+                <span className="text-slate-600">{stats.totalHours}h</span>
+                {showStats ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+              </button>
 
-          {/* Regenerate Button */}
-          {viewMode === 'week' && (
-            <button
-              onClick={() => generateMutation.mutate()}
-              disabled={generateMutation.isPending}
-              className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-50"
-              title="Regenerate schedule"
-            >
-              <RefreshCw className={`w-5 h-5 text-gray-600 ${generateMutation.isPending ? 'animate-spin' : ''}`} />
-            </button>
-          )}
-        </div>
-
-        {/* Expandable Stats Panel */}
-        {showStats && (
-          <div className="grid grid-cols-4 gap-2 mt-3 pb-1">
-            <div className="bg-purple-50 rounded-lg p-2 text-center">
-              <div className="text-lg font-bold text-purple-700">{stats.total}</div>
-              <div className="text-xs text-purple-600">Sessions</div>
-            </div>
-            <div className="bg-green-50 rounded-lg p-2 text-center">
-              <div className="text-lg font-bold text-green-700">{stats.completed}</div>
-              <div className="text-xs text-green-600">Done</div>
-            </div>
-            <div className="bg-blue-50 rounded-lg p-2 text-center">
-              <div className="text-lg font-bold text-blue-700">{stats.totalHours}h</div>
-              <div className="text-xs text-blue-600">Total</div>
-            </div>
-            <div className="bg-orange-50 rounded-lg p-2 text-center">
-              <div className="text-lg font-bold text-orange-700">{stats.remaining}</div>
-              <div className="text-xs text-orange-600">Left</div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Warning Banner */}
-      {scheduleWarning && (
-        <div className="flex-shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-amber-500" />
-          <span className="text-sm text-amber-700 flex-1">{scheduleWarning}</span>
-          <button onClick={() => setScheduleWarning(null)}><X className="w-4 h-4 text-amber-500" /></button>
-        </div>
-      )}
-
-      {/* Main Calendar Area - Takes remaining space */}
-      <div className="flex-1 overflow-hidden">
-        {isLoading ? (
-          <div className="h-full flex items-center justify-center">
-            <div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : viewMode === 'week' ? (
-          weekBlocks.length === 0 ? (
-            <div className="h-full flex items-center justify-center p-4">
-              <div className="text-center">
-                <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                <h3 className="text-lg font-bold text-gray-900 mb-1">No Sessions</h3>
-                <p className="text-gray-500 text-sm mb-4">Add goals to generate your schedule</p>
+              {/* Regenerate Button */}
+              {viewMode === 'week' && (
                 <button
-                  onClick={() => window.location.href = '/goals'}
-                  className="px-6 py-2 bg-purple-500 text-white rounded-full text-sm font-medium"
+                  onClick={() => generateMutation.mutate()}
+                  disabled={generateMutation.isPending}
+                  className="p-2.5 bg-white/40 hover:bg-white/60 rounded-xl disabled:opacity-50 transition-all"
+                  title="Regenerate schedule"
                 >
-                  Add Goal
+                  <RefreshCw className={`w-5 h-5 text-slate-500 ${generateMutation.isPending ? 'animate-spin' : ''}`} />
+                </button>
+              )}
+            </div>
+
+            {/* Expandable Stats Panel */}
+            {showStats && (
+              <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-white/40">
+                <GlassStat value={stats.total} label="Sessions" />
+                <GlassStat value={stats.completed} label="Done" />
+                <GlassStat value={`${stats.totalHours}h`} label="Total" />
+                <GlassStat value={stats.remaining} label="Left" />
+              </div>
+            )}
+          </GlassCard>
+        </div>
+
+        {/* Warning Banner */}
+        {scheduleWarning && (
+          <div className="flex-shrink-0 mx-4 mb-2">
+            <GlassCard className="p-3 bg-amber-50/80 border-amber-200/50" hover={false}>
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                <span className="text-sm text-amber-700 flex-1">{scheduleWarning}</span>
+                <button 
+                  onClick={() => setScheduleWarning(null)}
+                  className="p-1 hover:bg-amber-100 rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4 text-amber-500" />
                 </button>
               </div>
-            </div>
-          ) : (
-            <HourlyCalendar
-              blocks={weekBlocks}
-              availability={availabilityData?.availability}
-              userId={userId}
-              onBlockUpdate={() => refetchWeek()}
-              weekOffset={weekOffset}
-              setWeekOffset={setWeekOffset}
-            />
-          )
-        ) : viewMode === 'month' ? (
-          <MonthCalendar
-            blocks={monthBlocks}
-            currentDate={monthDate}
-            onDateChange={setMonthDate}
-            onDayClick={handleDayClick}
-          />
-        ) : (
-          <YearTimeline
-            goals={goalsData || []}
-            currentYear={currentYear}
-            onYearChange={setCurrentYear}
-            onGoalClick={handleGoalClick}
-          />
+            </GlassCard>
+          </div>
         )}
+
+        {/* Main Calendar Area */}
+        <div className="flex-1 overflow-hidden mx-4 mb-4">
+          <GlassCard className="h-full overflow-hidden" hover={false}>
+            {isLoading ? (
+              <div className="h-full flex items-center justify-center">
+                <Loader2 className="w-10 h-10 text-slate-400 animate-spin" />
+              </div>
+            ) : viewMode === 'week' ? (
+              weekBlocks.length === 0 ? (
+                <div className="h-full flex items-center justify-center p-4">
+                  <div className="text-center">
+                    <GlassIconBox size="lg" className="mx-auto mb-4">
+                      <Calendar className="w-6 h-6 text-slate-400" />
+                    </GlassIconBox>
+                    <h3 className="text-lg font-semibold text-slate-700 mb-2">No Sessions</h3>
+                    <p className="text-slate-500 text-sm mb-4">Add goals to generate your schedule</p>
+                    <GlassButton onClick={() => window.location.href = '/goals'}>
+                      <Target className="w-4 h-4" />
+                      Add Goal
+                    </GlassButton>
+                  </div>
+                </div>
+              ) : (
+                <HourlyCalendar
+                  blocks={weekBlocks}
+                  availability={availabilityData?.availability}
+                  userId={userId}
+                  onBlockUpdate={() => refetchWeek()}
+                  weekOffset={weekOffset}
+                  setWeekOffset={setWeekOffset}
+                />
+              )
+            ) : viewMode === 'month' ? (
+              <MonthCalendar
+                blocks={monthBlocks}
+                currentDate={monthDate}
+                onDateChange={setMonthDate}
+                onDayClick={handleDayClick}
+              />
+            ) : (
+              <YearTimeline
+                goals={goalsData || []}
+                currentYear={currentYear}
+                onYearChange={setCurrentYear}
+                onGoalClick={handleGoalClick}
+              />
+            )}
+          </GlassCard>
+        </div>
       </div>
-    </div>
+    </WallpaperBackground>
   );
 }

@@ -2,13 +2,11 @@ import { Router, Request, Response } from 'express';
 import { supabase } from '../services/supabase';
 import { parseRelativeTime, parseTime, combineDateAndTime } from '../utils/timeParser';
 import { rescheduleBlock } from '../services/planner';
-
 const router = Router();
-
+type PreferredTime = 'morning' | 'afternoon' | 'evening' | 'any';
 // ============================================================
 // HELPER FUNCTIONS
 // ============================================================
-
 /**
  * Parse time string to hours/minutes
  */
@@ -16,14 +14,12 @@ function parseTimeHelper(timeStr: string): { hours: number; minutes: number } {
   const [hours, minutes] = timeStr.split(':').map(Number);
   return { hours, minutes };
 }
-
 /**
  * Convert hours/minutes to total minutes from midnight
  */
 function toMinutes(hours: number, minutes: number): number {
   return hours * 60 + minutes;
 }
-
 /**
  * Convert minutes from midnight to time string
  */
@@ -33,7 +29,6 @@ function fromMinutes(totalMinutes: number): { hours: number; minutes: number } {
     minutes: totalMinutes % 60,
   };
 }
-
 /**
  * Calculate goal progress and return status message
  */
@@ -45,16 +40,13 @@ async function calculateGoalProgress(goalId: string): Promise<{ message: string;
       .select('*, plan')
       .eq('id', goalId)
       .single();
-
     if (!goal) return null;
-
     // Get all completed blocks for this goal
     const { data: completed } = await supabase
       .from('schedule_blocks')
       .select('duration_mins, completed_at')
       .eq('goal_id', goalId)
       .eq('status', 'completed');
-
     // Get all remaining scheduled blocks
     const { data: remaining } = await supabase
       .from('schedule_blocks')
@@ -62,12 +54,10 @@ async function calculateGoalProgress(goalId: string): Promise<{ message: string;
       .eq('goal_id', goalId)
       .eq('status', 'scheduled')
       .gt('scheduled_start', new Date().toISOString());
-
     const totalCompleted = completed?.length || 0;
     const totalRemaining = remaining?.length || 0;
     const totalHoursLogged = (completed || []).reduce((sum, b) => sum + (b.duration_mins || 0), 0) / 60;
     const targetHours = goal.plan?.total_estimated_hours || 50;
-
     // Calculate if ahead or behind
     const percentComplete = Math.round((totalHoursLogged / targetHours) * 100);
     
@@ -77,9 +67,7 @@ async function calculateGoalProgress(goalId: string): Promise<{ message: string;
     const now = new Date();
     const weeksSinceStart = Math.max(1, Math.floor((now.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000)));
     const expectedPercent = Math.min(100, Math.round((weeksSinceStart / totalWeeks) * 100));
-
     const daysAhead = Math.round((percentComplete - expectedPercent) * totalWeeks * 7 / 100);
-
     let message = '';
     if (daysAhead > 0) {
       message = `You're ${daysAhead} day${daysAhead > 1 ? 's' : ''} ahead! 🔥`;
@@ -88,17 +76,15 @@ async function calculateGoalProgress(goalId: string): Promise<{ message: string;
     } else {
       message = `Right on track! ✅`;
     }
-
     return { message, daysAhead };
   } catch (error) {
     console.error('Error calculating progress:', error);
     return null;
   }
 }
-
 /**
  * Get available time slots for a day
- * Now handles weekends properly (all day is free if no work)
+ * Uses user's wake_time / sleep_time (from onboarding/settings)
  */
 function getAvailableSlots(
   dayName: string,
@@ -106,16 +92,13 @@ function getAvailableSlots(
   userBlocksForDay: Array<{ start: number; end: number }> = []
 ): Array<{ start: number; end: number }> {
   const slots: Array<{ start: number; end: number }> = [];
-
-  // Use availability settings or sensible defaults
-  const wake = parseTimeHelper(availability?.wake_time || '06:00');
-  const sleep = parseTimeHelper(availability?.sleep_time || '22:00');
+  // Use availability settings or sensible defaults (align with UI defaults 07:00–23:00)
+  const wake = parseTimeHelper(availability?.wake_time || '07:00');
+  const sleep = parseTimeHelper(availability?.sleep_time || '23:00');
   const wakeMinutes = toMinutes(wake.hours, wake.minutes);
   const sleepMinutes = toMinutes(sleep.hours, sleep.minutes);
-
   // Build blocked times from ALL sources
   const blocked: Array<{ start: number; end: number }> = [];
-
   // 1. Work schedule from availability (if exists)
   const workSchedule = availability?.work_schedule?.[dayName];
   if (workSchedule && workSchedule.start && workSchedule.end) {
@@ -125,7 +108,6 @@ function getAvailableSlots(
       start: toMinutes(workStart.hours, workStart.minutes),
       end: toMinutes(workEnd.hours, workEnd.minutes),
     });
-
     // Add commute before/after work
     const commuteMins = availability?.daily_commute_mins || 0;
     if (commuteMins > 0) {
@@ -139,7 +121,6 @@ function getAvailableSlots(
       });
     }
   }
-
   // 2. Fixed commitments from availability (if exists)
   const fixedCommitments = (availability?.fixed_commitments || [])
     .filter((c: any) => c.day?.toLowerCase() === dayName)
@@ -148,13 +129,10 @@ function getAvailableSlots(
       end: toMinutes(...Object.values(parseTimeHelper(c.end)) as [number, number]),
     }));
   blocked.push(...fixedCommitments);
-
   // 3. User-created blocks from calendar (work, commute, events added via UI)
   blocked.push(...userBlocksForDay);
-
   // Sort blocked times
   blocked.sort((a, b) => a.start - b.start);
-
   // Merge overlapping blocks
   const mergedBlocked: Array<{ start: number; end: number }> = [];
   for (const block of blocked) {
@@ -167,10 +145,8 @@ function getAvailableSlots(
       );
     }
   }
-
   // Find free slots between wake and sleep
   let currentTime = wakeMinutes;
-
   for (const block of mergedBlocked) {
     if (block.start > currentTime && block.start < sleepMinutes) {
       // Free slot before this block
@@ -178,23 +154,21 @@ function getAvailableSlots(
     }
     currentTime = Math.max(currentTime, block.end);
   }
-
   // Final slot until sleep
   if (currentTime < sleepMinutes) {
     slots.push({ start: currentTime, end: sleepMinutes });
   }
-
   return slots;
 }
-
 /**
  * Find best available slot with VARIED start times
+ * Respects preferred time-of-day
  */
 function findBestSlot(
   availableSlots: Array<{ start: number; end: number }>,
   scheduledSlots: Array<{ start: number; end: number; goalId: string }>,
   duration: number,
-  preference: 'morning' | 'afternoon' | 'evening' | 'any',
+  preference: PreferredTime,
   goalId: string,
   sessionIndex: number = 0
 ): { start: number; end: number } | null {
@@ -202,22 +176,17 @@ function findBestSlot(
   
   const TIME_OFFSETS = [0, 45, 90, 30, 75, 15, 60, 105];
   const offset = TIME_OFFSETS[sessionIndex % TIME_OFFSETS.length];
-
-  const timeRanges = {
+  const timeRanges: Record<Exclude<PreferredTime, 'any'>, { start: number; end: number }> = {
     morning: { start: 5 * 60, end: 12 * 60 },
     afternoon: { start: 12 * 60, end: 17 * 60 },
     evening: { start: 17 * 60, end: 23 * 60 },
   };
-
   const candidateSlots: Array<{ start: number; end: number; score: number }> = [];
-
   for (const availSlot of availableSlots) {
     const scheduledInSlot = scheduledSlots
       .filter((s) => s.start < availSlot.end && s.end > availSlot.start)
       .sort((a, b) => a.start - b.start);
-
     let searchStart = availSlot.start;
-
     for (const scheduled of scheduledInSlot) {
       const gapEnd = scheduled.start - BUFFER;
       if (gapEnd - searchStart >= duration) {
@@ -230,7 +199,6 @@ function findBestSlot(
       }
       searchStart = Math.max(searchStart, scheduled.end + BUFFER);
     }
-
     if (availSlot.end - searchStart >= duration) {
       const maxStart = availSlot.end - duration;
       const adjustedStart = Math.min(searchStart + offset, maxStart);
@@ -241,9 +209,7 @@ function findBestSlot(
       });
     }
   }
-
   if (candidateSlots.length === 0) return null;
-
   for (const candidate of candidateSlots) {
     if (preference !== 'any') {
       const range = timeRanges[preference];
@@ -251,26 +217,24 @@ function findBestSlot(
         candidate.score += 100;
       }
     }
-
+    // Penalise super early if not a morning pref
     if (candidate.start < 7 * 60 && preference !== 'morning') {
       candidate.score -= 50;
     }
-
     const startMins = candidate.start % 60;
+    // Prefer :00 / :30
     if (startMins === 0 || startMins === 30) {
       candidate.score += 10;
     } else if (startMins === 15 || startMins === 45) {
       candidate.score += 5;
     }
   }
-
   candidateSlots.sort((a, b) => b.score - a.score);
-
   return { start: candidateSlots[0].start, end: candidateSlots[0].end };
 }
-
 /**
  * Smart scheduling with better spreading and user block support
+ * + per-goal preferred_time / preferred_days support
  */
 function generateSmartSchedule(
   goals: any[],
@@ -281,17 +245,14 @@ function generateSmartSchedule(
   const blocks: any[] = [];
   const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   let warning: string | null = null;
-
   const scheduledByDay: Record<string, Array<{ start: number; end: number; goalId: string }>> = {};
   DAYS.forEach((day) => {
     scheduledByDay[day] = [];
   });
-
   const userBlocksByDay: Record<string, Array<{ start: number; end: number }>> = {};
   DAYS.forEach((day) => {
     userBlocksByDay[day] = [];
   });
-
   existingUserBlocks.forEach((block) => {
     const blockDate = new Date(block.scheduled_start);
     const dayIndex = blockDate.getDay();
@@ -311,14 +272,12 @@ function generateSmartSchedule(
       goalId: block.goal_id || 'user',
     });
   });
-
   console.log(`\n📦 User blocks by day:`);
   DAYS.forEach((day) => {
     if (userBlocksByDay[day].length > 0) {
       console.log(`   ${day}: ${userBlocksByDay[day].length} blocks`);
     }
   });
-
   const getGoalWeekNumber = (goal: any): number => {
     const createdAt = new Date(goal.created_at || new Date());
     const weeksSinceCreation = Math.floor(
@@ -326,7 +285,6 @@ function generateSmartSchedule(
     );
     return Math.max(1, weeksSinceCreation + 1);
   };
-
   interface PlannedSession {
     goalId: string;
     oderId: string;
@@ -336,12 +294,11 @@ function generateSmartSchedule(
     sessionDuration: number;
     sessionDescription?: string;
     sessionTip?: string;
-    preferredTime: 'morning' | 'afternoon' | 'evening' | 'any';
+    preferredTime: PreferredTime;
+    preferredDays?: string[]; // 🆕 per-goal preferred days
     scheduled: boolean;
   }
-
   const plannedSessions: PlannedSession[] = [];
-
   goals
     .filter((goal) => goal.plan && goal.plan.weekly_hours > 0)
     .forEach((goal) => {
@@ -354,16 +311,27 @@ function generateSmartSchedule(
         const weekIndex = (currentWeek - 1) % weeklyPlans.length;
         weekPlan = weeklyPlans[weekIndex];
       }
-
-      let preferredTime: 'morning' | 'afternoon' | 'evening' | 'any' = 'any';
-      if (goal.category === 'fitness' || goal.category === 'climbing') {
-        preferredTime = availability.preferred_workout_time || 'morning';
-      } else if (goal.category === 'business' || goal.category === 'career') {
-        preferredTime = 'evening';
-      } else if (goal.category === 'languages') {
-        preferredTime = 'morning';
+      // 🆕 Resolve per-goal preferred time
+      let preferredTime: PreferredTime =
+        (goal.preferred_time as PreferredTime) ||
+        (goal.plan?.preferred_time as PreferredTime) ||
+        'any';
+      // Fallback to your old heuristics if still 'any'
+      if (!preferredTime || preferredTime === 'any') {
+        if (goal.category === 'fitness' || goal.category === 'climbing') {
+          preferredTime = availability.preferred_workout_time || 'morning';
+        } else if (goal.category === 'business' || goal.category === 'career') {
+          preferredTime = 'evening';
+        } else if (goal.category === 'languages') {
+          preferredTime = 'morning';
+        }
       }
-
+      // 🆕 Per-goal preferred days
+      const preferredDays: string[] | undefined =
+        goal.preferred_days ||
+        goal.plan?.preferred_days ||
+        undefined;
+      const normalizedPreferredDays = preferredDays?.map((d: string) => d.toLowerCase());
       if (weekPlan && weekPlan.sessions && weekPlan.sessions.length > 0) {
         console.log(`   📋 ${goal.name} Week ${currentWeek}: ${weekPlan.sessions.length} specific sessions`);
         
@@ -378,6 +346,7 @@ function generateSmartSchedule(
             sessionDescription: session.description || session.focus || '',
             sessionTip: session.notes || session.tip || session.coach_tip || '',
             preferredTime,
+            preferredDays: normalizedPreferredDays,
             scheduled: false,
           });
         });
@@ -397,39 +366,40 @@ function generateSmartSchedule(
             sessionName: `${goal.name} - Session ${i + 1}`,
             sessionDuration: Math.min(Math.max(sessionDuration, 15), 120),
             preferredTime,
+            preferredDays: normalizedPreferredDays,
             scheduled: false,
           });
         }
       }
     });
-
   plannedSessions.sort((a, b) => b.sessionDuration - a.sessionDuration);
-
   console.log(`\n📊 Sessions to schedule: ${plannedSessions.length} total`);
   plannedSessions.forEach((ps) => {
-    console.log(`   ${ps.goalName}: "${ps.sessionName}" (${ps.sessionDuration}min) [${ps.preferredTime}]`);
+    console.log(
+      `   ${ps.goalName}: "${ps.sessionName}" (${ps.sessionDuration}min) [${ps.preferredTime}]${
+        ps.preferredDays ? ` days=${ps.preferredDays.join(',')}` : ''
+      }`
+    );
   });
-
   const availableByDay: Record<string, Array<{ start: number; end: number }>> = {};
   DAYS.forEach((day) => {
     availableByDay[day] = getAvailableSlots(day, availability, userBlocksByDay[day]);
   });
-
   console.log(`\n📅 Available time per day:`);
   let totalAvailableMins = 0;
   DAYS.forEach((day) => {
     const totalMins = availableByDay[day].reduce((sum, slot) => sum + (slot.end - slot.start), 0);
     totalAvailableMins += totalMins;
-    const hours = Math.round(totalMins / 60 * 10) / 10;
+    const hours = Math.round((totalMins / 60) * 10) / 10;
     console.log(`   ${day}: ${hours}h free`);
   });
-
   const totalNeededMins = plannedSessions.reduce((sum, ps) => sum + ps.sessionDuration, 0);
   if (totalNeededMins > totalAvailableMins * 0.8) {
-    warning = `You need ${Math.round(totalNeededMins / 60)}h/week for all goals, but only have ~${Math.round(totalAvailableMins / 60)}h available. Some sessions may not fit.`;
+    warning = `You need ${Math.round(totalNeededMins / 60)}h/week for all goals, but only have ~${Math.round(
+      totalAvailableMins / 60
+    )}h available. Some sessions may not fit.`;
     console.log(`\n⚠️ ${warning}`);
   }
-
   let globalSessionIndex = 0;
   
   const sessionsByGoal: Record<string, PlannedSession[]> = {};
@@ -437,13 +407,10 @@ function generateSmartSchedule(
     if (!sessionsByGoal[ps.goalId]) sessionsByGoal[ps.goalId] = [];
     sessionsByGoal[ps.goalId].push(ps);
   });
-
   let round = 0;
   const MAX_ROUNDS = 50;
-
   while (round < MAX_ROUNDS) {
     let anyScheduledThisRound = false;
-
     const dayOrder = [...DAYS];
     if (round > 0) {
       const rotateBy = round % 7;
@@ -451,25 +418,28 @@ function generateSmartSchedule(
         dayOrder.push(dayOrder.shift()!);
       }
     }
-
     for (const dayName of dayOrder) {
       const dayIndex = DAYS.indexOf(dayName);
       const currentDay = new Date(startOfWeek);
       currentDay.setDate(startOfWeek.getDate() + dayIndex);
-
       for (const goalId of Object.keys(sessionsByGoal)) {
         const goalSessions = sessionsByGoal[goalId];
         const nextSession = goalSessions.find((s) => !s.scheduled);
         
         if (!nextSession) continue;
-
+        // 🆕 Respect per-goal preferred_days if set
+        if (
+          nextSession.preferredDays &&
+          !nextSession.preferredDays.includes(dayName.toLowerCase())
+        ) {
+          continue;
+        }
         const sessionsThisDayForGoal = scheduledByDay[dayName].filter(
           (s) => s.goalId === goalId
         ).length;
         
         const maxPerDay = Math.max(Math.ceil(goalSessions.length / 5), 2);
         if (sessionsThisDayForGoal >= maxPerDay) continue;
-
         const slot = findBestSlot(
           availableByDay[dayName],
           scheduledByDay[dayName],
@@ -478,18 +448,15 @@ function generateSmartSchedule(
           nextSession.goalId,
           globalSessionIndex
         );
-
         if (slot) {
           const scheduledTime = new Date(currentDay);
           const { hours, minutes } = fromMinutes(slot.start);
           scheduledTime.setHours(hours, minutes, 0, 0);
-
           const notesData = [
             nextSession.sessionName,
             nextSession.sessionDescription || '',
             nextSession.sessionTip || ''
           ].join('|||');
-
           blocks.push({
             user_id: nextSession.oderId,
             goal_id: nextSession.goalId,
@@ -501,56 +468,49 @@ function generateSmartSchedule(
             created_by: 'auto',
             flexibility: 'movable',
           });
-
           scheduledByDay[dayName].push({
             start: slot.start,
             end: slot.end,
             goalId: nextSession.goalId,
           });
-
           nextSession.scheduled = true;
           globalSessionIndex++;
           anyScheduledThisRound = true;
         }
       }
     }
-
     round++;
-
     const allDone = plannedSessions.every((ps) => ps.scheduled);
-
     if (allDone) {
       console.log(`\n✅ All ${plannedSessions.length} sessions scheduled after ${round} rounds`);
       break;
     }
-
     if (!anyScheduledThisRound) {
       console.log(`\n⚠️ No more slots available after ${round} rounds`);
       
       const unscheduled = plannedSessions.filter((ps) => !ps.scheduled);
       if (unscheduled.length > 0) {
-        const details = unscheduled.slice(0, 3).map((ps) => 
-          `"${ps.sessionName}" (${ps.sessionDuration}min)`
-        ).join(', ');
+        const details = unscheduled
+          .slice(0, 3)
+          .map((ps) => `"${ps.sessionName}" (${ps.sessionDuration}min)`)
+          .join(', ');
         
-        warning = `Couldn't fit ${unscheduled.length} sessions: ${details}${unscheduled.length > 3 ? '...' : ''}. Consider adjusting your schedule or reducing session count.`;
+        warning = `Couldn't fit ${unscheduled.length} sessions: ${details}${
+          unscheduled.length > 3 ? '...' : ''
+        }. Consider adjusting your schedule or reducing session count.`;
       }
       break;
     }
   }
-
   const scheduledCount = plannedSessions.filter((ps) => ps.scheduled).length;
   const totalHours = Math.round(blocks.reduce((sum, b) => sum + b.duration_mins, 0) / 60);
   console.log(`\n✅ Generated ${blocks.length} sessions (${totalHours}h total)`);
   console.log(`   Scheduled: ${scheduledCount}/${plannedSessions.length} sessions`);
-
   return { blocks, warning };
 }
-
 // ============================================================
 // ROUTES
 // ============================================================
-
 /**
  * GET /api/schedule
  * Get schedule blocks for a date range
@@ -558,13 +518,11 @@ function generateSmartSchedule(
 router.get('/', async (req: Request, res: Response) => {
   try {
     const { user_id, start_date, end_date } = req.query;
-
     if (!user_id) {
       return res.status(400).json({
         error: 'Missing user_id query parameter',
       });
     }
-
     let query = supabase
       .from('schedule_blocks')
       .select(
@@ -574,21 +532,16 @@ router.get('/', async (req: Request, res: Response) => {
       `
       )
       .eq('user_id', user_id as string);
-
     if (start_date) {
       query = query.gte('scheduled_start', start_date as string);
     }
-
     if (end_date) {
       query = query.lte('scheduled_start', end_date as string);
     }
-
     const { data: blocks, error } = await query.order('scheduled_start', {
       ascending: true,
     });
-
     if (error) throw error;
-
     return res.json({
       blocks: blocks || [],
       count: blocks?.length || 0,
@@ -601,7 +554,6 @@ router.get('/', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * GET /api/schedule/today
  * Get today's schedule
@@ -609,15 +561,12 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/today', async (req: Request, res: Response) => {
   try {
     const { user_id } = req.query;
-
     if (!user_id) {
       return res.status(400).json({
         error: 'Missing user_id query parameter',
       });
     }
-
     const today = new Date().toISOString().split('T')[0];
-
     const { data: blocks, error } = await supabase
       .from('schedule_blocks')
       .select(
@@ -630,9 +579,7 @@ router.get('/today', async (req: Request, res: Response) => {
       .gte('scheduled_start', `${today}T00:00:00`)
       .lt('scheduled_start', `${today}T23:59:59`)
       .order('scheduled_start', { ascending: true });
-
     if (error) throw error;
-
     return res.json({
       date: today,
       blocks: blocks || [],
@@ -646,7 +593,6 @@ router.get('/today', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * POST /api/schedule
  * Create a new schedule block
@@ -655,14 +601,12 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const { user_id, goal_id, type, scheduled_start, duration_mins, notes } =
       req.body;
-
     if (!user_id || !type || !scheduled_start || !duration_mins) {
       return res.status(400).json({
         error: 'Missing required fields',
         required: ['user_id', 'type', 'scheduled_start', 'duration_mins'],
       });
     }
-
     const { data: block, error } = await supabase
       .from('schedule_blocks')
       .insert({
@@ -678,11 +622,8 @@ router.post('/', async (req: Request, res: Response) => {
       })
       .select()
       .single();
-
     if (error) throw error;
-
     console.log(`✅ Created schedule block: ${type} at ${scheduled_start}`);
-
     return res.json({
       block,
       message: 'Schedule block created',
@@ -695,7 +636,6 @@ router.post('/', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * POST /api/schedule/recurring
  * Create recurring blocks across multiple days for the entire calendar
@@ -703,7 +643,6 @@ router.post('/', async (req: Request, res: Response) => {
 router.post('/recurring', async (req: Request, res: Response) => {
   try {
     const { user_id, type, days, start_time, end_time, notes } = req.body;
-
     if (!user_id || !type || !days || !Array.isArray(days) || days.length === 0 || !start_time || !end_time) {
       return res.status(400).json({
         error: 'Missing required fields',
@@ -718,21 +657,17 @@ router.post('/recurring', async (req: Request, res: Response) => {
         }
       });
     }
-
     const [startHours, startMins] = start_time.split(':').map(Number);
     const [endHours, endMins] = end_time.split(':').map(Number);
     const durationMins = (endHours * 60 + endMins) - (startHours * 60 + startMins);
-
     if (durationMins <= 0) {
       return res.status(400).json({ error: 'End time must be after start time' });
     }
-
-    console.log(`\n📅 ========== CREATING RECURRING BLOCKS ==========`);
-    console.log(`👤 User: ${user_id}`);
-    console.log(`📋 Type: ${type}`);
-    console.log(`📆 Days: ${days.join(', ')}`);
-    console.log(`⏰ Time: ${start_time} - ${end_time} (${durationMins} mins)`);
-
+    console.log(`\n📅 ========== CREATING RECURRING BLOCKS ==========
+👤 User: ${user_id}
+📋 Type: ${type}
+📆 Days: ${days.join(', ')}
+⏰ Time: ${start_time} - ${end_time} (${durationMins} mins)`);
     const { data: goals } = await supabase
       .from('goals')
       .select('target_date')
@@ -741,7 +676,6 @@ router.post('/recurring', async (req: Request, res: Response) => {
       .not('target_date', 'is', null)
       .order('target_date', { ascending: false })
       .limit(1);
-
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -753,9 +687,7 @@ router.post('/recurring', async (req: Request, res: Response) => {
       scheduleEndDate = new Date(today);
       scheduleEndDate.setDate(scheduleEndDate.getDate() + 12 * 7);
     }
-
     console.log(`📆 Scheduling from ${today.toDateString()} to ${scheduleEndDate.toDateString()}`);
-
     const DAYS_MAP: Record<string, number> = {
       'sunday': 0,
       'monday': 1,
@@ -765,25 +697,20 @@ router.post('/recurring', async (req: Request, res: Response) => {
       'friday': 5,
       'saturday': 6,
     };
-
     const targetDayIndices = days
       .map((d: string) => DAYS_MAP[d.toLowerCase()])
       .filter((d: number | undefined) => d !== undefined);
-
     if (targetDayIndices.length === 0) {
       return res.status(400).json({ error: 'Invalid day names provided' });
     }
-
     const blocksToCreate: any[] = [];
     const currentDate = new Date(today);
-
     while (currentDate <= scheduleEndDate) {
       const dayIndex = currentDate.getDay();
       
       if (targetDayIndices.includes(dayIndex)) {
         const scheduledStart = new Date(currentDate);
         scheduledStart.setHours(startHours, startMins, 0, 0);
-
         blocksToCreate.push({
           user_id,
           goal_id: null,
@@ -796,12 +723,9 @@ router.post('/recurring', async (req: Request, res: Response) => {
           status: 'scheduled',
         });
       }
-
       currentDate.setDate(currentDate.getDate() + 1);
     }
-
     console.log(`📦 Creating ${blocksToCreate.length} blocks...`);
-
     for (const block of blocksToCreate) {
       await supabase
         .from('schedule_blocks')
@@ -811,25 +735,20 @@ router.post('/recurring', async (req: Request, res: Response) => {
         .eq('scheduled_start', block.scheduled_start)
         .eq('created_by', 'user');
     }
-
     const BATCH_SIZE = 100;
     let insertedCount = 0;
-
     for (let i = 0; i < blocksToCreate.length; i += BATCH_SIZE) {
       const batch = blocksToCreate.slice(i, i + BATCH_SIZE);
       const { error: insertError } = await supabase
         .from('schedule_blocks')
         .insert(batch);
-
       if (insertError) {
         console.error('Batch insert error:', insertError);
         throw insertError;
       }
       insertedCount += batch.length;
     }
-
     console.log(`✅ Created ${insertedCount} recurring blocks`);
-
     return res.json({
       success: true,
       blocksCreated: insertedCount,
@@ -840,7 +759,6 @@ router.post('/recurring', async (req: Request, res: Response) => {
       schedule_until: scheduleEndDate.toISOString().split('T')[0],
       message: `Created ${insertedCount} ${type} blocks for ${days.join(', ')} from ${start_time} to ${end_time}`,
     });
-
   } catch (error: any) {
     console.error('❌ Recurring block creation error:', error);
     return res.status(500).json({
@@ -849,27 +767,29 @@ router.post('/recurring', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * Generate schedule for a SINGLE GOAL for its ENTIRE DURATION
+ * Respects preferred_days / preferred_time if available
+ * 
+ * FIX #1: Uses 'users' table instead of 'user_availability'
+ * FIX #2: Properly handles "today" - doesn't skip it
+ * FIX #3: Distributes sessions evenly across preferred days
  */
 async function generateFullGoalSchedule(
   goal: any,
   userId: string,
   preferredDays: string[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
-  preferredTime: 'morning' | 'afternoon' | 'evening' | 'any' = 'any'
+  preferredTime: PreferredTime = 'any'
 ): Promise<{ blocksCreated: number; warning: string | null }> {
-  console.log(`\n🗓️ ========== GENERATING FULL SCHEDULE FOR GOAL ==========`);
-  console.log(`📋 Goal: ${goal.name}`);
-  console.log(`📅 Preferred days: ${preferredDays.join(', ')}`);
-  console.log(`⏰ Preferred time: ${preferredTime}`);
-
+  console.log(`\n🗓️ ========== GENERATING FULL SCHEDULE FOR GOAL ==========
+📋 Goal: ${goal.name}
+📅 Preferred days: ${preferredDays.join(', ')}
+⏰ Preferred time: ${preferredTime}`);
   const plan = goal.plan;
   if (!plan || !plan.weekly_hours || plan.weekly_hours <= 0) {
     console.log('⚠️ No valid plan found');
     return { blocksCreated: 0, warning: 'No valid training plan' };
   }
-
   const startDate = new Date();
   startDate.setHours(0, 0, 0, 0);
   
@@ -881,24 +801,26 @@ async function generateFullGoalSchedule(
     endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + totalWeeks * 7);
   }
-
   const totalWeeks = Math.ceil((endDate.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
   console.log(`📆 Duration: ${totalWeeks} weeks (${startDate.toDateString()} → ${endDate.toDateString()})`);
 
+  // ✅ FIX #1: Use 'users' table instead of 'user_availability'
   const { data: availability } = await supabase
-    .from('user_availability')
+    .from('users')
     .select('*')
-    .eq('user_id', userId)
+    .eq('id', userId)
     .single();
 
   const effectiveAvailability = availability || {
-    wake_time: '06:00',
-    sleep_time: '22:00',
+    wake_time: '07:00',
+    sleep_time: '23:00',
     work_schedule: {},
     fixed_commitments: [],
     daily_commute_mins: 0,
     preferred_workout_time: preferredTime,
   };
+  
+  console.log(`📅 Availability: ${availability ? 'Custom set' : 'Using defaults (7am-11pm)'}`);
 
   const { data: existingUserBlocks } = await supabase
     .from('schedule_blocks')
@@ -907,27 +829,27 @@ async function generateFullGoalSchedule(
     .gte('scheduled_start', startDate.toISOString())
     .lt('scheduled_start', endDate.toISOString())
     .or('created_by.eq.user,type.in.(work,commute,event,social)');
-
   console.log(`📦 Existing blocks to schedule around: ${existingUserBlocks?.length || 0}`);
-
   await supabase
     .from('schedule_blocks')
     .delete()
     .eq('user_id', userId)
     .eq('goal_id', goal.id)
     .eq('created_by', 'auto');
-
   const weeklyPlan = plan.weekly_plan;
   const allBlocks: any[] = [];
   let warning: string | null = null;
-
   const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const sessionsPerWeek = plan.sessions_per_week || 3;
+  
+  // ✅ FIX #3: Calculate max sessions per day for even distribution
+  const normalizedPreferredDays = preferredDays.map(d => d.toLowerCase());
+  const maxSessionsPerDay = Math.max(1, Math.ceil(sessionsPerWeek / normalizedPreferredDays.length));
+  console.log(`📊 Max ${maxSessionsPerDay} sessions per day (${sessionsPerWeek} sessions / ${normalizedPreferredDays.length} days)`);
 
   for (let weekNum = 0; weekNum < totalWeeks; weekNum++) {
     const weekStart = new Date(startDate);
     weekStart.setDate(startDate.getDate() + weekNum * 7);
-
     let weekSessions: any[] = [];
     
     if (weeklyPlan?.weeks && weeklyPlan.weeks[weekNum]) {
@@ -945,18 +867,14 @@ async function generateFullGoalSchedule(
         });
       }
     }
-
     const scheduledThisWeek: Array<{ day: string; start: number; end: number }> = [];
-
     const userBlocksByDay: Record<string, Array<{ start: number; end: number }>> = {};
     DAYS.forEach(day => { userBlocksByDay[day] = []; });
-
     (existingUserBlocks || []).forEach((block: any) => {
       const blockDate = new Date(block.scheduled_start);
       const blockWeekStart = new Date(blockDate);
       blockWeekStart.setDate(blockDate.getDate() - blockDate.getDay());
       blockWeekStart.setHours(0, 0, 0, 0);
-
       if (blockWeekStart.getTime() === weekStart.getTime()) {
         const dayName = DAYS[blockDate.getDay()];
         const startMins = blockDate.getHours() * 60 + blockDate.getMinutes();
@@ -971,42 +889,126 @@ async function generateFullGoalSchedule(
     for (const session of weekSessions) {
       const duration = session.duration_mins || 60;
       let scheduled = false;
-
-      for (const dayName of preferredDays) {
+      
+      // ✅ FIX #3: Sort preferred days by least scheduled first for even distribution
+      const sortedPreferredDays = [...normalizedPreferredDays].sort((a, b) => {
+        const countA = scheduledThisWeek.filter(s => s.day === a).length;
+        const countB = scheduledThisWeek.filter(s => s.day === b).length;
+        return countA - countB;
+      });
+      
+      // 1) Try preferredDays first
+      for (const dayName of sortedPreferredDays) {
         if (scheduled) break;
         
-        const dayIndex = DAYS.indexOf(dayName.toLowerCase());
+        const dayIndex = DAYS.indexOf(dayName);
         if (dayIndex === -1) continue;
-
+        
+        // ✅ FIX #3: Check if this day already has max sessions
+        const sessionsOnThisDay = scheduledThisWeek.filter(s => s.day === dayName).length;
+        if (sessionsOnThisDay >= maxSessionsPerDay) {
+          console.log(`   ⏭️ Skipping ${dayName}: already has ${sessionsOnThisDay}/${maxSessionsPerDay} sessions`);
+          continue;
+        }
+        
         const dayDate = new Date(weekStart);
         dayDate.setDate(weekStart.getDate() + dayIndex);
-
-        if (dayDate < new Date()) continue;
-
+        
+        // ✅ FIX #2: Only skip days that are BEFORE today, not today itself
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const dayDateNormalized = new Date(dayDate);
+        dayDateNormalized.setHours(0, 0, 0, 0);
+        
+        if (dayDateNormalized < today) {
+          continue; // Skip past days
+        }
+        
         const availSlots = getAvailableSlots(dayName, effectiveAvailability, userBlocksByDay[dayName]);
-
-        for (const slot of availSlots) {
+        const scheduledSlotsForDay = scheduledThisWeek
+          .filter(s => s.day === dayName)
+          .map(s => ({ start: s.start, end: s.end, goalId: goal.id as string }));
+        const slot = findBestSlot(
+          availSlots,
+          scheduledSlotsForDay,
+          duration,
+          preferredTime,
+          goal.id,
+          sessionIndex
+        );
+        if (!slot) continue;
+        const candidateStart = slot.start;
+        const candidateEnd = slot.end;
+        // Make sure we don't collide within the same week/day
+        let hasConflict = false;
+        for (const existing of scheduledThisWeek.filter(s => s.day === dayName)) {
+          if (candidateStart < existing.end + 15 && candidateEnd > existing.start - 15) {
+            hasConflict = true;
+            break;
+          }
+        }
+        if (!hasConflict) {
+          const scheduledTime = new Date(dayDate);
+          scheduledTime.setHours(Math.floor(candidateStart / 60), candidateStart % 60, 0, 0);
+          allBlocks.push({
+            user_id: userId,
+            goal_id: goal.id,
+            type: goal.category === 'fitness' || goal.category === 'climbing' ? 'workout' : 'training',
+            scheduled_start: scheduledTime.toISOString(),
+            duration_mins: duration,
+            status: 'scheduled',
+            notes: [session.name, session.description || '', session.tip || ''].join('|||'),
+            created_by: 'auto',
+            flexibility: 'movable',
+          });
+          scheduledThisWeek.push({ day: dayName, start: candidateStart, end: candidateEnd });
+          scheduled = true;
+        }
+      }
+      // 2) If still not scheduled, allow any day as fallback
+      if (!scheduled) {
+        for (const dayName of DAYS) {
           if (scheduled) break;
+          if (normalizedPreferredDays.includes(dayName)) continue;
+          const dayIndex = DAYS.indexOf(dayName);
+          const dayDate = new Date(weekStart);
+          dayDate.setDate(weekStart.getDate() + dayIndex);
           
-          if (slot.end - slot.start < duration) continue;
-
-          const todayScheduled = scheduledThisWeek.filter(s => s.day === dayName);
-          let hasConflict = false;
-
+          // ✅ FIX #2: Only skip days that are BEFORE today, not today itself
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const dayDateNormalized = new Date(dayDate);
+          dayDateNormalized.setHours(0, 0, 0, 0);
+          
+          if (dayDateNormalized < today) {
+            continue; // Skip past days
+          }
+          
+          const availSlots = getAvailableSlots(dayName, effectiveAvailability, userBlocksByDay[dayName]);
+          const scheduledSlotsForDay = scheduledThisWeek
+            .filter(s => s.day === dayName)
+            .map(s => ({ start: s.start, end: s.end, goalId: goal.id as string }));
+          const slot = findBestSlot(
+            availSlots,
+            scheduledSlotsForDay,
+            duration,
+            preferredTime,
+            goal.id,
+            sessionIndex
+          );
+          if (!slot) continue;
           const candidateStart = slot.start;
-          const candidateEnd = candidateStart + duration;
-
-          for (const existing of todayScheduled) {
+          const candidateEnd = slot.end;
+          let hasConflict = false;
+          for (const existing of scheduledThisWeek.filter(s => s.day === dayName)) {
             if (candidateStart < existing.end + 15 && candidateEnd > existing.start - 15) {
               hasConflict = true;
               break;
             }
           }
-
           if (!hasConflict) {
             const scheduledTime = new Date(dayDate);
             scheduledTime.setHours(Math.floor(candidateStart / 60), candidateStart % 60, 0, 0);
-
             allBlocks.push({
               user_id: userId,
               goal_id: goal.id,
@@ -1018,73 +1020,17 @@ async function generateFullGoalSchedule(
               created_by: 'auto',
               flexibility: 'movable',
             });
-
             scheduledThisWeek.push({ day: dayName, start: candidateStart, end: candidateEnd });
             scheduled = true;
           }
         }
       }
-
-      if (!scheduled) {
-        for (const dayName of DAYS) {
-          if (scheduled) break;
-          if (preferredDays.map(d => d.toLowerCase()).includes(dayName)) continue;
-
-          const dayIndex = DAYS.indexOf(dayName);
-          const dayDate = new Date(weekStart);
-          dayDate.setDate(weekStart.getDate() + dayIndex);
-
-          if (dayDate < new Date()) continue;
-
-          const availSlots = getAvailableSlots(dayName, effectiveAvailability, userBlocksByDay[dayName]);
-
-          for (const slot of availSlots) {
-            if (scheduled) break;
-            if (slot.end - slot.start < duration) continue;
-
-            const todayScheduled = scheduledThisWeek.filter(s => s.day === dayName);
-            let hasConflict = false;
-            const candidateStart = slot.start;
-            const candidateEnd = candidateStart + duration;
-
-            for (const existing of todayScheduled) {
-              if (candidateStart < existing.end + 15 && candidateEnd > existing.start - 15) {
-                hasConflict = true;
-                break;
-              }
-            }
-
-            if (!hasConflict) {
-              const scheduledTime = new Date(dayDate);
-              scheduledTime.setHours(Math.floor(candidateStart / 60), candidateStart % 60, 0, 0);
-
-              allBlocks.push({
-                user_id: userId,
-                goal_id: goal.id,
-                type: goal.category === 'fitness' || goal.category === 'climbing' ? 'workout' : 'training',
-                scheduled_start: scheduledTime.toISOString(),
-                duration_mins: duration,
-                status: 'scheduled',
-                notes: [session.name, session.description || '', session.tip || ''].join('|||'),
-                created_by: 'auto',
-                flexibility: 'movable',
-              });
-
-              scheduledThisWeek.push({ day: dayName, start: candidateStart, end: candidateEnd });
-              scheduled = true;
-            }
-          }
-        }
-      }
-
       if (!scheduled) {
         warning = `Some sessions couldn't be scheduled. Consider adjusting your availability or reducing weekly hours.`;
       }
-
       sessionIndex++;
     }
   }
-
   if (allBlocks.length > 0) {
     const BATCH_SIZE = 100;
     for (let i = 0; i < allBlocks.length; i += BATCH_SIZE) {
@@ -1092,26 +1038,33 @@ async function generateFullGoalSchedule(
       const { error: insertError } = await supabase
         .from('schedule_blocks')
         .insert(batch);
-
       if (insertError) {
         console.error('Insert batch error:', insertError);
         throw insertError;
       }
     }
   }
-
   console.log(`✅ Created ${allBlocks.length} schedule blocks for ${totalWeeks} weeks`);
-
   return { blocksCreated: allBlocks.length, warning };
 }
-
 /**
  * POST /api/schedule/generate-for-goal
  * Generate full schedule for a specific goal
+ * 
+ * Supports two modes:
+ * 1. placed_sessions: User's exact session placements from visual scheduler
+ * 2. Auto-scheduling: Uses preferred_days/preferred_time to find best slots
  */
 router.post('/generate-for-goal', async (req: Request, res: Response) => {
   try {
-    const { user_id, goal_id, preferred_days, preferred_time } = req.body;
+    const { 
+      user_id, 
+      goal_id, 
+      preferred_days, 
+      preferred_time,
+      placed_sessions,  // From visual scheduler: [{ day, hour, minute, duration_mins, name?, description?, tip? }]
+      weekly_plan       // Full plan content for session details
+    } = req.body;
 
     if (!user_id || !goal_id) {
       return res.status(400).json({ error: 'Missing user_id or goal_id' });
@@ -1127,11 +1080,141 @@ router.post('/generate-for-goal', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Goal not found' });
     }
 
+    // ============================================================
+    // MODE 1: Handle placed_sessions from visual scheduler
+    // ============================================================
+    if (placed_sessions && placed_sessions.length > 0) {
+      console.log(`\n📍 ========== USING PLACED SESSIONS ==========`);
+      console.log(`📍 Goal: ${goal.name}`);
+      console.log(`📍 Sessions per week: ${placed_sessions.length}`);
+      
+      const plan = goal.plan || {};
+      const totalWeeks = plan.total_weeks || 12;
+      const weeklyPlanWeeks = weekly_plan?.weeks || plan.weekly_plan?.weeks || [];
+      
+      console.log(`📍 Total weeks: ${totalWeeks}`);
+      console.log(`📍 Weekly plan weeks available: ${weeklyPlanWeeks.length}`);
+
+      // Delete existing scheduled blocks for this goal
+      const { error: deleteError } = await supabase
+        .from('schedule_blocks')
+        .delete()
+        .eq('goal_id', goal_id)
+        .eq('status', 'scheduled');
+      
+      if (deleteError) {
+        console.error('Delete error:', deleteError);
+      }
+
+      const allBlocks: any[] = [];
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const dayMap: Record<string, number> = {
+        'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3,
+        'thursday': 4, 'friday': 5, 'saturday': 6
+      };
+
+      // Get start of current week (Sunday)
+      const currentWeekStart = new Date(today);
+      currentWeekStart.setDate(today.getDate() - today.getDay());
+      currentWeekStart.setHours(0, 0, 0, 0);
+
+      for (let weekIndex = 0; weekIndex < totalWeeks; weekIndex++) {
+        const weekStart = new Date(currentWeekStart);
+        weekStart.setDate(currentWeekStart.getDate() + (weekIndex * 7));
+        
+        // Get session content for this week (cycle through if beyond available weeks)
+        const weekContent = weeklyPlanWeeks.length > 0 
+          ? weeklyPlanWeeks[Math.min(weekIndex, weeklyPlanWeeks.length - 1)]
+          : null;
+        const weekSessions = weekContent?.sessions || [];
+        
+        placed_sessions.forEach((placement: any, sessionIndex: number) => {
+          const dayOffset = dayMap[placement.day?.toLowerCase()];
+          if (dayOffset === undefined) {
+            console.log(`⚠️ Invalid day: ${placement.day}`);
+            return;
+          }
+          
+          const sessionDate = new Date(weekStart);
+          sessionDate.setDate(weekStart.getDate() + dayOffset);
+          sessionDate.setHours(placement.hour || 9, placement.minute || 0, 0, 0);
+          
+          // Skip if in the past
+          if (sessionDate < new Date()) {
+            return;
+          }
+          
+          // Get session content - prefer enriched data from placement, else from weekly_plan
+          const weekSession = weekSessions[sessionIndex % Math.max(1, weekSessions.length)];
+          
+          // Priority: placement data > week session data > fallback
+          const sessionName = placement.name || weekSession?.name || `Week ${weekIndex + 1} - Session ${sessionIndex + 1}`;
+          const sessionDesc = placement.description || weekSession?.description || '';
+          const sessionTip = placement.tip || weekSession?.tip || weekSession?.notes || '';
+          
+          // Build notes in standard format: name|||description|||tip
+          const notes = [sessionName, sessionDesc, sessionTip].join('|||');
+          
+          allBlocks.push({
+            user_id,
+            goal_id,
+            type: goal.category === 'fitness' || goal.category === 'climbing' ? 'workout' : 'training',
+            scheduled_start: sessionDate.toISOString(),
+            duration_mins: placement.duration_mins || plan.session_length_mins || 60,
+            status: 'scheduled',
+            notes,
+            created_by: 'user',  // Mark as user-placed
+            flexibility: 'fixed', // User explicitly placed these
+          });
+        });
+      }
+
+      // Insert all blocks in batches
+      if (allBlocks.length > 0) {
+        const BATCH_SIZE = 100;
+        for (let i = 0; i < allBlocks.length; i += BATCH_SIZE) {
+          const batch = allBlocks.slice(i, i + BATCH_SIZE);
+          const { error: insertError } = await supabase
+            .from('schedule_blocks')
+            .insert(batch);
+
+          if (insertError) {
+            console.error('Insert batch error:', insertError);
+            throw insertError;
+          }
+        }
+      }
+
+      console.log(`✅ Created ${allBlocks.length} schedule blocks from placed sessions`);
+
+      return res.json({
+        success: true,
+        blocksCreated: allBlocks.length,
+        warning: null,
+        message: `Generated ${allBlocks.length} sessions for "${goal.name}" using your schedule`,
+      });
+    }
+
+    // ============================================================
+    // MODE 2: Auto-scheduling (existing logic)
+    // ============================================================
+    const resolvedPreferredDays: string[] =
+      preferred_days ||
+      goal.preferred_days ||
+      ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+    const resolvedPreferredTime: PreferredTime =
+      preferred_time ||
+      goal.preferred_time ||
+      'any';
+
     const result = await generateFullGoalSchedule(
       goal,
       user_id,
-      preferred_days || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
-      preferred_time || 'any'
+      resolvedPreferredDays,
+      resolvedPreferredTime
     );
 
     return res.json({
@@ -1148,37 +1231,31 @@ router.post('/generate-for-goal', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * POST /api/schedule/auto-generate
  * Auto-generate weekly schedule based on goals and availability
+ * 
+ * ✅ FIX #1: Uses 'users' table instead of 'user_availability'
  */
 router.post('/auto-generate', async (req: Request, res: Response) => {
   try {
     const { user_id } = req.body;
-
     if (!user_id) {
       return res.status(400).json({ error: 'Missing user_id' });
     }
-
-    console.log(`\n🤖 ========== AUTO-GENERATE SCHEDULE ==========`);
-    console.log(`🤖 User: ${user_id}`);
-
+    console.log(`\n🤖 ========== AUTO-GENERATE SCHEDULE ==========
+🤖 User: ${user_id}`);
     const { data: goals, error: goalsError } = await supabase
       .from('goals')
       .select('*')
       .eq('user_id', user_id)
       .eq('status', 'active');
-
     if (goalsError) throw goalsError;
-
     const goalsWithPlans = (goals || []).filter(
       (g) => g.plan && g.plan.weekly_hours && g.plan.weekly_hours > 0
     );
-
     console.log(`📋 Active goals: ${goals?.length || 0}`);
     console.log(`📋 Goals with plans (weekly_hours > 0): ${goalsWithPlans.length}`);
-
     if (goalsWithPlans.length === 0) {
       return res.status(400).json({
         error: 'No active goals with training plans found',
@@ -1186,31 +1263,28 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
       });
     }
 
+    // ✅ FIX #1: Use 'users' table instead of 'user_availability'
     const { data: availability } = await supabase
-      .from('user_availability')
+      .from('users')
       .select('*')
-      .eq('user_id', user_id)
+      .eq('id', user_id)
       .single();
 
     const effectiveAvailability = availability || {
-      wake_time: '06:00',
-      sleep_time: '22:00',
+      wake_time: '07:00',
+      sleep_time: '23:00',
       work_schedule: {},
       fixed_commitments: [],
       daily_commute_mins: 0,
       preferred_workout_time: 'morning',
     };
-
-    console.log(`📅 Availability: ${availability ? 'Custom set' : 'Using defaults (6am-10pm)'}`);
-
+    console.log(`📅 Availability: ${availability ? 'Custom set' : 'Using defaults (7am-11pm)'}`);
     const today = new Date();
     const startOfWeek = new Date(today);
     startOfWeek.setDate(today.getDate() - today.getDay());
     startOfWeek.setHours(0, 0, 0, 0);
-
     const endOfWeek = new Date(startOfWeek);
     endOfWeek.setDate(startOfWeek.getDate() + 7);
-
     const { data: existingUserBlocks } = await supabase
       .from('schedule_blocks')
       .select('*')
@@ -1218,9 +1292,7 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
       .gte('scheduled_start', startOfWeek.toISOString())
       .lt('scheduled_start', endOfWeek.toISOString())
       .or('created_by.eq.user,type.in.(work,commute,event,social)');
-
     console.log(`📦 Existing user blocks to schedule around: ${existingUserBlocks?.length || 0}`);
-
     await supabase
       .from('schedule_blocks')
       .delete()
@@ -1228,25 +1300,20 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
       .eq('created_by', 'auto')
       .gte('scheduled_start', startOfWeek.toISOString())
       .lt('scheduled_start', endOfWeek.toISOString());
-
     const { blocks: schedule, warning } = generateSmartSchedule(
       goalsWithPlans, 
       effectiveAvailability, 
       startOfWeek,
       existingUserBlocks || []
     );
-
     if (schedule.length > 0) {
       const { error: insertError } = await supabase
         .from('schedule_blocks')
         .insert(schedule);
-
       if (insertError) throw insertError;
     }
-
     const totalHours = Math.round(schedule.reduce((sum, b) => sum + b.duration_mins, 0) / 60);
     console.log(`\n✅ SUCCESS: ${schedule.length} sessions, ${totalHours}h total`);
-
     return res.json({
       success: true,
       schedule,
@@ -1266,11 +1333,9 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
     });
   }
 });
-
 // ============================================================
 // NEW ENDPOINTS - Complete with notes, Skip, Smart Reschedule
 // ============================================================
-
 /**
  * PATCH /api/schedule/:id/complete-with-notes
  * Complete a block with just notes (simplified - no metrics)
@@ -1279,9 +1344,7 @@ router.patch('/:id/complete-with-notes', async (req: Request, res: Response) => 
   try {
     const { id } = req.params;
     const { notes } = req.body;
-
     console.log(`✅ Completing block ${id} with notes`);
-
     const { data: block, error } = await supabase
       .from('schedule_blocks')
       .update({
@@ -1295,9 +1358,7 @@ router.patch('/:id/complete-with-notes', async (req: Request, res: Response) => 
         goals (id, name, category, plan, target_date)
       `)
       .single();
-
     if (error) throw error;
-
     let progressMessage = null;
     if (block.goal_id) {
       const progress = await calculateGoalProgress(block.goal_id);
@@ -1305,13 +1366,11 @@ router.patch('/:id/complete-with-notes', async (req: Request, res: Response) => 
         progressMessage = progress.message;
       }
     }
-
     return res.json({
       success: true,
       block,
       message: progressMessage || 'Session logged!',
     });
-
   } catch (error: any) {
     console.error('❌ Complete with notes error:', error);
     return res.status(500).json({
@@ -1320,7 +1379,6 @@ router.patch('/:id/complete-with-notes', async (req: Request, res: Response) => 
     });
   }
 });
-
 /**
  * PATCH /api/schedule/:id/skip
  * Skip a block - marks as skipped, calculates deadline impact
@@ -1328,9 +1386,7 @@ router.patch('/:id/complete-with-notes', async (req: Request, res: Response) => 
 router.patch('/:id/skip', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-
     console.log(`⏭️ Skipping block ${id}`);
-
     const { data: block, error: fetchError } = await supabase
       .from('schedule_blocks')
       .select(`
@@ -1339,20 +1395,16 @@ router.patch('/:id/skip', async (req: Request, res: Response) => {
       `)
       .eq('id', id)
       .single();
-
     if (fetchError || !block) {
       return res.status(404).json({ error: 'Block not found' });
     }
-
     const { error: updateError } = await supabase
       .from('schedule_blocks')
       .update({
         status: 'skipped',
       })
       .eq('id', id);
-
     if (updateError) throw updateError;
-
     let deadlineImpact = null;
     if (block.goal_id && block.goals?.target_date) {
       const scheduledDate = new Date(block.scheduled_start);
@@ -1374,13 +1426,11 @@ router.patch('/:id/skip', async (req: Request, res: Response) => {
           .eq('id', block.goal_id);
       }
     }
-
     return res.json({
       success: true,
       deadline_impact: deadlineImpact,
       message: deadlineImpact || 'Session skipped',
     });
-
   } catch (error: any) {
     console.error('❌ Skip error:', error);
     return res.status(500).json({
@@ -1389,7 +1439,6 @@ router.patch('/:id/skip', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * PATCH /api/schedule/:id/reschedule-smart
  * Smart reschedule - later today, tomorrow, or custom time
@@ -1398,22 +1447,17 @@ router.patch('/:id/reschedule-smart', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { option, custom_time } = req.body;
-
     console.log(`📅 Smart reschedule block ${id} to ${option}`);
-
     const { data: block, error: fetchError } = await supabase
       .from('schedule_blocks')
       .select('*')
       .eq('id', id)
       .single();
-
     if (fetchError || !block) {
       return res.status(404).json({ error: 'Block not found' });
     }
-
     let newStart: Date;
     const now = new Date();
-
     if (option === 'later_today') {
       newStart = new Date(now);
       newStart.setHours(Math.max(now.getHours() + 2, 18), 0, 0, 0);
@@ -1432,9 +1476,7 @@ router.patch('/:id/reschedule-smart', async (req: Request, res: Response) => {
     } else {
       return res.status(400).json({ error: 'Invalid reschedule option' });
     }
-
     const originalStart = block.original_scheduled_start || block.scheduled_start;
-
     const { data: updated, error: updateError } = await supabase
       .from('schedule_blocks')
       .update({
@@ -1445,9 +1487,7 @@ router.patch('/:id/reschedule-smart', async (req: Request, res: Response) => {
       .eq('id', id)
       .select()
       .single();
-
     if (updateError) throw updateError;
-
     return res.json({
       success: true,
       block: updated,
@@ -1458,7 +1498,6 @@ router.patch('/:id/reschedule-smart', async (req: Request, res: Response) => {
         minute: '2-digit' 
       })}`,
     });
-
   } catch (error: any) {
     console.error('❌ Smart reschedule error:', error);
     return res.status(500).json({
@@ -1467,7 +1506,6 @@ router.patch('/:id/reschedule-smart', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * PATCH /api/schedule/:id/push-to-next-week
  * Push a session to next week - affects goal deadline
@@ -1475,9 +1513,7 @@ router.patch('/:id/reschedule-smart', async (req: Request, res: Response) => {
 router.patch('/:id/push-to-next-week', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-
     console.log(`📅 Pushing block ${id} to next week`);
-
     const { data: block, error: fetchError } = await supabase
       .from('schedule_blocks')
       .select(`
@@ -1486,19 +1522,15 @@ router.patch('/:id/push-to-next-week', async (req: Request, res: Response) => {
       `)
       .eq('id', id)
       .single();
-
     if (fetchError || !block) {
       return res.status(404).json({ error: 'Block not found' });
     }
-
     // Calculate new date (same day next week)
     const currentDate = new Date(block.scheduled_start);
     const newDate = new Date(currentDate);
     newDate.setDate(currentDate.getDate() + 7);
-
     // Store original start if not set
     const originalStart = block.original_scheduled_start || block.scheduled_start;
-
     // Update the block
     const { data: updated, error: updateError } = await supabase
       .from('schedule_blocks')
@@ -1510,9 +1542,7 @@ router.patch('/:id/push-to-next-week', async (req: Request, res: Response) => {
       .eq('id', id)
       .select()
       .single();
-
     if (updateError) throw updateError;
-
     // Calculate deadline impact
     let deadlineImpact: string | null = null;
     if (block.goal_id && block.goals?.target_date) {
@@ -1527,13 +1557,11 @@ router.patch('/:id/push-to-next-week', async (req: Request, res: Response) => {
         .from('goals')
         .update({ target_date: currentTarget.toISOString().split('T')[0] })
         .eq('id', block.goal_id);
-
       deadlineImpact = `Goal deadline pushed to ${currentTarget.toLocaleDateString('en-GB', { 
         day: 'numeric', 
         month: 'short' 
       })} (+${daysImpact} days)`;
     }
-
     return res.json({
       success: true,
       block: updated,
@@ -1545,7 +1573,6 @@ router.patch('/:id/push-to-next-week', async (req: Request, res: Response) => {
         month: 'short' 
       })}`,
     });
-
   } catch (error: any) {
     console.error('❌ Push to next week error:', error);
     return res.status(500).json({
@@ -1554,7 +1581,6 @@ router.patch('/:id/push-to-next-week', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * PATCH /api/schedule/:id/complete-early
  * Complete a future session early - can pull deadline forward
@@ -1563,9 +1589,7 @@ router.patch('/:id/complete-early', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { notes } = req.body;
-
     console.log(`✅ Completing block ${id} early`);
-
     const { data: block, error: fetchError } = await supabase
       .from('schedule_blocks')
       .select(`
@@ -1574,11 +1598,9 @@ router.patch('/:id/complete-early', async (req: Request, res: Response) => {
       `)
       .eq('id', id)
       .single();
-
     if (fetchError || !block) {
       return res.status(404).json({ error: 'Block not found' });
     }
-
     // Mark as completed
     const { data: updated, error: updateError } = await supabase
       .from('schedule_blocks')
@@ -1590,9 +1612,7 @@ router.patch('/:id/complete-early', async (req: Request, res: Response) => {
       .eq('id', id)
       .select()
       .single();
-
     if (updateError) throw updateError;
-
     // Check if completing early - session was scheduled for the future
     let deadlineImpact: string | null = null;
     const scheduledDate = new Date(block.scheduled_start);
@@ -1611,14 +1631,12 @@ router.patch('/:id/complete-early', async (req: Request, res: Response) => {
           .from('goals')
           .update({ target_date: currentTarget.toISOString().split('T')[0] })
           .eq('id', block.goal_id);
-
         deadlineImpact = `Completed ${daysAhead} day${daysAhead > 1 ? 's' : ''} early! Deadline pulled to ${currentTarget.toLocaleDateString('en-GB', { 
           day: 'numeric', 
           month: 'short' 
         })} 🔥`;
       }
     }
-
     // Calculate progress
     let progressMessage = 'Session logged!';
     if (block.goal_id) {
@@ -1627,14 +1645,12 @@ router.patch('/:id/complete-early', async (req: Request, res: Response) => {
         progressMessage = progress.message;
       }
     }
-
     return res.json({
       success: true,
       block: updated,
       deadline_impact: deadlineImpact,
       message: deadlineImpact || progressMessage,
     });
-
   } catch (error: any) {
     console.error('❌ Complete early error:', error);
     return res.status(500).json({
@@ -1643,11 +1659,9 @@ router.patch('/:id/complete-early', async (req: Request, res: Response) => {
     });
   }
 });
-
 // ============================================================
 // EXISTING ENDPOINTS (unchanged)
 // ============================================================
-
 /**
  * PATCH /api/schedule/:id
  * Update a schedule block (for drag-and-drop)
@@ -1656,29 +1670,23 @@ router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { scheduled_start, duration_mins, notes } = req.body;
-
     const updateData: any = {};
     if (scheduled_start) updateData.scheduled_start = scheduled_start;
     if (duration_mins) updateData.duration_mins = duration_mins;
     if (notes !== undefined) updateData.notes = notes;
-
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({
         error: 'No update data provided',
       });
     }
-
     const { data: block, error } = await supabase
       .from('schedule_blocks')
       .update(updateData)
       .eq('id', id)
       .select()
       .single();
-
     if (error) throw error;
-
     console.log(`✅ Updated schedule block: ${id}`);
-
     return res.json({
       block,
       message: 'Schedule block updated',
@@ -1691,7 +1699,6 @@ router.patch('/:id', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * PATCH /api/schedule/:id/with-future
  * Update a schedule block and optionally apply the same time change to all future matching sessions
@@ -1700,32 +1707,25 @@ router.patch('/:id/with-future', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { scheduled_start, apply_to_future } = req.body;
-
     if (!scheduled_start) {
       return res.status(400).json({ error: 'scheduled_start is required' });
     }
-
     const { data: originalBlock, error: fetchError } = await supabase
       .from('schedule_blocks')
       .select('*, goals(name, category)')
       .eq('id', id)
       .single();
-
     if (fetchError || !originalBlock) {
       return res.status(404).json({ error: 'Block not found' });
     }
-
     const { data: updatedBlock, error: updateError } = await supabase
       .from('schedule_blocks')
       .update({ scheduled_start })
       .eq('id', id)
       .select()
       .single();
-
     if (updateError) throw updateError;
-
     let updatedCount = 1;
-
     if (apply_to_future && originalBlock.goal_id && originalBlock.notes) {
       const originalDate = new Date(originalBlock.scheduled_start);
       const newDate = new Date(scheduled_start);
@@ -1736,7 +1736,11 @@ router.patch('/:id/with-future', async (req: Request, res: Response) => {
       const newHour = newDate.getHours();
       const newMinute = newDate.getMinutes();
       
-      console.log(`🔄 Applying to future sessions: "${sessionName}" -> ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][newDayOfWeek]} ${newHour}:${String(newMinute).padStart(2, '0')}`);
+      console.log(
+        `🔄 Applying to future sessions: "${sessionName}" -> ${
+          ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][newDayOfWeek]
+        } ${newHour}:${String(newMinute).padStart(2, '0')}`
+      );
       
       const { data: futureBlocks, error: futureError } = await supabase
         .from('schedule_blocks')
@@ -1745,16 +1749,12 @@ router.patch('/:id/with-future', async (req: Request, res: Response) => {
         .gt('scheduled_start', originalBlock.scheduled_start)
         .neq('id', id)
         .eq('status', 'scheduled');
-
       if (futureError) throw futureError;
-
       const matchingBlocks = (futureBlocks || []).filter(block => {
         const blockSessionName = (block.notes || '').split('|||')[0];
         return blockSessionName === sessionName;
       });
-
       console.log(`📦 Found ${matchingBlocks.length} future matching sessions`);
-
       for (const block of matchingBlocks) {
         const blockDate = new Date(block.scheduled_start);
         
@@ -1766,20 +1766,16 @@ router.patch('/:id/with-future', async (req: Request, res: Response) => {
         const newBlockDate = new Date(blockDate);
         newBlockDate.setDate(blockDate.getDate() + daysDiff);
         newBlockDate.setHours(newHour, newMinute, 0, 0);
-
         const { error: blockUpdateError } = await supabase
           .from('schedule_blocks')
           .update({ scheduled_start: newBlockDate.toISOString() })
           .eq('id', block.id);
-
         if (!blockUpdateError) {
           updatedCount++;
         }
       }
-
       console.log(`✅ Updated ${updatedCount} sessions total (1 current + ${matchingBlocks.length} future)`);
     }
-
     return res.json({
       block: updatedBlock,
       updatedCount,
@@ -1795,7 +1791,6 @@ router.patch('/:id/with-future', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * PATCH /api/schedule/:id/reschedule
  * Reschedule a block (legacy endpoint)
@@ -1804,16 +1799,13 @@ router.patch('/:id/reschedule', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { new_start_time } = req.body;
-
     if (!new_start_time) {
       return res.status(400).json({
         error: 'Missing new_start_time',
       });
     }
-
     const newDate = new Date(new_start_time);
     const block = await rescheduleBlock(id, newDate);
-
     return res.json({
       block,
       message: 'Block rescheduled successfully',
@@ -1826,7 +1818,6 @@ router.patch('/:id/reschedule', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * DELETE /api/schedule/:id
  * Delete a schedule block
@@ -1834,13 +1825,9 @@ router.patch('/:id/reschedule', async (req: Request, res: Response) => {
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-
     const { error } = await supabase.from('schedule_blocks').delete().eq('id', id);
-
     if (error) throw error;
-
     console.log(`🗑️ Deleted schedule block: ${id}`);
-
     return res.json({
       message: 'Schedule block deleted',
     });
@@ -1852,7 +1839,6 @@ router.delete('/:id', async (req: Request, res: Response) => {
     });
   }
 });
-
 /**
  * PATCH /api/schedule/:id/complete
  * Mark a block as completed (legacy - no notes)
@@ -1860,7 +1846,6 @@ router.delete('/:id', async (req: Request, res: Response) => {
 router.patch('/:id/complete', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-
     const { data: block, error } = await supabase
       .from('schedule_blocks')
       .update({
@@ -1870,11 +1855,8 @@ router.patch('/:id/complete', async (req: Request, res: Response) => {
       .eq('id', id)
       .select()
       .single();
-
     if (error) throw error;
-
     console.log(`✅ Marked block complete: ${id}`);
-
     return res.json({
       block,
       message: 'Block marked as completed',
@@ -1887,5 +1869,4 @@ router.patch('/:id/complete', async (req: Request, res: Response) => {
     });
   }
 });
-
 export default router;

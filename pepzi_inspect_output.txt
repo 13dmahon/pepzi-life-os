@@ -1,0 +1,592 @@
+== Pepzi repo root ==
+/home/ascensionfd50/pepzi
+
+== Root files ==
+backend
+frontend
+inspect_pepzi.sh
+pepzi_inspect_output.txt
+pepzi_snapshot.sh
+pepzi_snapshot.txt
+README.md
+
+== Root README ==
+# 🧠 Pepzi Life OS
+
+AI-powered Life Operating System with natural language goal tracking, scheduling, and progress monitoring.
+
+## ✨ Live API
+
+**Endpoint:** https://pepzi-backend-1029121217006.us-central1.run.app
+
+**Try it:**
+```bash
+curl -X POST https://pepzi-backend-1029121217006.us-central1.run.app/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"550e8400-e29b-41d4-a957-146664440000","message":"I ran 5km today"}'
+```
+
+## 🎯 Features
+
+- 🤖 Natural language chat interface
+- 🎯 Goal extraction and management
+- 📅 Intelligent scheduling
+- 📝 Activity logging with micro-goals
+- 📊 Real-time progress tracking
+- ⏰ Smart time parsing
+
+## 🏗️ Tech Stack
+
+- Node.js + Express + TypeScript
+- Supabase (PostgreSQL)
+- OpenAI GPT-4
+- Google Cloud Run
+
+## 📚 API Endpoints
+
+- `POST /api/chat` - Natural language conversation
+- `POST /api/goals` - Create goals
+- `POST /api/goals/from-dreams` - Extract goals from text
+- `GET /api/schedule` - Get schedule
+- `POST /api/schedule` - Create schedule blocks
+
+## 🚀 Quick Start
+```bash
+git clone https://github.com/13dmahon/pepzi-life-os.git
+cd pepzi-life-os/backend
+npm install
+npm run dev
+```
+
+## 👨‍💻 Author
+
+Built by [@13dmahon](https://github.com/13dmahon)
+
+## 📄 License
+
+MIT
+
+==============================
+
+== backend directory ==
+/home/ascensionfd50/pepzi/backend
+
+-- ls backend --
+Dockerfile
+package.json
+package-lock.json
+pepzi-backend@1.0.0
+pepzi-backend-snapshot-20251121-233505.txt
+PEPZI_PROJECT_SNAPSHOT.md
+src
+tsconfig.json
+ts-node-dev
+
+-- backend/package.json --
+{
+  "name": "pepzi-backend",
+  "version": "1.0.0",
+  "description": "Pepzi AI Life OS - Backend API",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "pepzi",
+    "life-os",
+    "ai",
+    "scheduling"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "axios": "^1.13.2",
+    "cors": "^2.8.5",
+    "date-fns": "^3.0.6",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "openai": "^4.24.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.6",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}
+
+-- backend/tsconfig.json (if exists) --
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+
+-- backend/src tree (max depth 2) --
+src/routes/schedule copy.ts
+src/routes/memory.ts
+src/routes/goals.ts
+src/routes/availability.ts
+src/routes/chat.ts
+src/routes/schedule.ts
+src/routes/ai-chat.ts
+src/routes/goals copy.ts
+src/index.ts
+src/services/planner.ts
+src/services/logger.ts
+src/services/openai.ts
+src/services/memory.ts
+src/services/contextBuilder.ts
+src/services/supabase.ts
+src/index copy.ts
+src/utils/timeParser.ts
+
+---- src/index.ts (first 200 lines) ----
+import express, { Request, Response } from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import chatRoutes from './routes/chat';
+import goalRoutes from './routes/goals';
+import scheduleRoutes from './routes/schedule';
+import memoryRoutes from './routes/memory';
+import availabilityRoutes from './routes/availability';
+import aiChatRoutes from './routes/ai-chat';
+
+dotenv.config();
+
+const app = express();
+
+// CORS Configuration - Allow Cloud Run + Cloud Shell + localhost
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    
+    const allowedPatterns = [
+      /^https?:\/\/localhost:\d+$/,
+      /^https:\/\/.*\.cloudshell\.dev$/,
+      /^https:\/\/.*\.run\.app$/,
+    ];
+    
+    if (allowedPatterns.some(pattern => pattern.test(origin))) {
+      callback(null, true);
+    } else {
+      console.log('❌ CORS blocked:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(express.json());
+
+app.use('/api/chat', chatRoutes);
+app.use('/api/goals', goalRoutes);
+app.use('/api/schedule', scheduleRoutes);
+app.use('/api/memory', memoryRoutes);
+app.use('/api/availability', availabilityRoutes);
+app.use('/api/ai-chat', aiChatRoutes);
+
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/', (_req: Request, res: Response) => {
+  res.json({ message: 'Pepzi Life OS API', version: '1.0.0' });
+});
+
+const port = parseInt(process.env.PORT || '8080', 10);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`🚀 Pepzi Backend running on port ${port}`);
+});
+
+==============================
+
+== frontend directory ==
+/home/ascensionfd50/pepzi/frontend
+
+-- ls frontend --
+app
+components
+Dockerfile
+frontend@0.1.0
+lib
+next.config.ts
+package.json
+package-lock.json
+pepzi-frontend-snapshot-20251122-080653.txt
+PEPZI_PROJECT_SNAPSHOT.md
+postcss.config.mjs
+public
+README.md
+tsconfig.json
+types
+
+-- frontend/package.json (if exists) --
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@supabase/supabase-js": "^2.86.0",
+    "@tanstack/react-query": "^5.90.10",
+    "axios": "^1.13.2",
+    "date-fns": "^4.1.0",
+    "framer-motion": "^12.23.24",
+    "lucide-react": "^0.554.0",
+    "next": "16.0.3",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+
+-- frontend src tree (max depth 2, if exists) --
+No frontend/src directory
+
+==============================
+
+== Snapshot files (if present) ==
+-- pepzi_snapshot.sh --
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 🚩 EDIT THIS if your project lives somewhere else
+PROJECT_DIR="$HOME/pepzi"
+OUT="$PROJECT_DIR/pepzi_snapshot.txt"
+
+cd "$PROJECT_DIR"
+
+echo "🔧 Pepzi snapshot generated on: $(date)" > "$OUT"
+echo >> "$OUT"
+
+########################################
+# 1) Directory structure (high-level)
+########################################
+echo "=== DIRECTORY TREE (max depth 3) ===" >> "$OUT"
+# If tree is installed, use it; otherwise fall back to find
+if command -v tree >/dev/null 2>&1; then
+  tree -L 3 -I 'node_modules|.next|.git|dist|build|.turbo|.vscode' >> "$OUT"
+else
+  echo "(tree not installed; using find instead)" >> "$OUT"
+  find . -maxdepth 3 \
+    -not -path '*/node_modules*' \
+    -not -path '*/.git*' \
+    -not -path '*/.next*' >> "$OUT"
+fi
+
+echo -e "\n\n" >> "$OUT"
+
+########################################
+# 2) BACKEND: key files
+########################################
+if [ -d "backend" ]; then
+  echo "=== BACKEND: package.json ===" >> "$OUT"
+  sed -n '1,160p' backend/package.json >> "$OUT" 2>/dev/null || echo "(missing)" >> "$OUT"
+  echo -e "\n--- backend/tsconfig.json ---" >> "$OUT"
+  sed -n '1,160p' backend/tsconfig.json >> "$OUT" 2>/dev/null || echo "(missing)" >> "$OUT"
+
+  echo -e "\n--- backend/src/index.ts ---" >> "$OUT"
+  sed -n '1,200p' backend/src/index.ts >> "$OUT" 2>/dev/null || echo "(missing)" >> "$OUT"
+
+  echo -e "\n--- backend/src/routes (first 160 lines of each) ---" >> "$OUT"
+  for f in backend/src/routes/*.ts; do
+    [ -e "$f" ] || continue
+    echo -e "\n##### $f #####" >> "$OUT"
+    sed -n '1,160p' "$f" >> "$OUT"
+  done
+
+  echo -e "\n--- backend/src/services (first 160 lines of each) ---" >> "$OUT"
+  for f in backend/src/services/*.ts; do
+    [ -e "$f" ] || continue
+    echo -e "\n##### $f #####" >> "$OUT"
+    sed -n '1,160p' "$f" >> "$OUT"
+  done
+fi
+
+echo -e "\n\n" >> "$OUT"
+
+########################################
+# 3) FRONTEND: key files
+########################################
+if [ -d "frontend" ]; then
+  echo "=== FRONTEND: package.json ===" >> "$OUT"
+  sed -n '1,160p' frontend/package.json >> "$OUT" 2>/dev/null || echo "(missing)" >> "$OUT"
+
+  echo -e "\n--- frontend/tsconfig.json ---" >> "$OUT"
+  sed -n '1,160p' frontend/tsconfig.json >> "$OUT" 2>/dev/null || echo "(missing)" >> "$OUT"
+
+  echo -e "\n--- frontend/next.config.* ---" >> "$OUT"
+  for f in frontend/next.config.*; do
+    [ -e "$f" ] || continue
+    echo -e "\n##### $f #####" >> "$OUT"
+    sed -n '1,160p' "$f" >> "$OUT"
+  done
+
+  echo -e "\n--- frontend/tailwind/postcss configs ---" >> "$OUT"
+  for f in frontend/tailwind.config.* frontend/postcss.config.*; do
+    [ -e "$f" ] || continue
+    echo -e "\n##### $f #####" >> "$OUT"
+    sed -n '1,160p' "$f" >> "$OUT"
+  done
+
+  echo -e "\n--- frontend app entry files ---" >> "$OUT"
+  for f in frontend/src/app/page.tsx frontend/app/page.tsx; do
+    [ -e "$f" ] || continue
+    echo -e "\n##### $f #####" >> "$OUT"
+    sed -n '1,200p' "$f" >> "$OUT"
+  done
+
+  echo -e "\n--- goal-related components ---" >> "$OUT"
+  for f in frontend/src/components/goals/*.tsx frontend/components/goals/*.tsx; do
+    [ -e "$f" ] || continue
+    echo -e "\n##### $f #####" >> "$OUT"
+    sed -n '1,200p' "$f" >> "$OUT"
+  done
+fi
+
+echo -e "\n\n=== NOTE ===" >> "$OUT"
+echo "This snapshot intentionally skips .env, node_modules, .next, etc. Double-check for secrets before sharing." >> "$OUT"
+
+echo "✅ Snapshot written to: $OUT"
+
+-- pepzi_snapshot.txt --
+🔧 Pepzi snapshot generated on: Mon Nov 24 04:53:42 PM UTC 2025
+
+=== DIRECTORY TREE (max depth 3) ===
+(tree not installed; using find instead)
+.
+./pepzi_snapshot.sh
+./pepzi_snapshot.txt
+./backend
+./backend/package.json
+./backend/pepzi-backend-snapshot-20251121-233505.txt
+./backend/.env
+./backend/ts-node-dev
+./backend/package-lock.json
+./backend/tsconfig.json
+./backend/src
+./backend/src/types
+./backend/src/routes
+./backend/src/index.ts
+./backend/src/services
+./backend/src/utils
+./backend/dist
+./backend/dist/routes
+./backend/dist/services
+./backend/dist/utils
+./backend/dist/index.js
+./backend/Dockerfile
+./backend/.dockerignore
+./backend/pepzi-backend@1.0.0
+./backend/.env.example
+./README.md
+./infra
+./infra/supabase
+./frontend
+./frontend/package.json
+./frontend/pepzi-frontend-snapshot-20251122-080653.txt
+./frontend/types
+./frontend/types/index.ts
+./frontend/postcss.config.mjs
+./frontend/next.config.ts
+./frontend/next.config.mjs
+./frontend/components
+./frontend/components/schedule
+./frontend/components/goals
+./frontend/components/chat
+./frontend/components/Navigation.tsx
+./frontend/components/AvailabilityModal.tsx
+./frontend/components/FeasibilityWidget.tsx
+./frontend/components/ui
+./frontend/package-lock.json
+./frontend/public
+./frontend/public/globe.svg
+./frontend/public/next.svg
+./frontend/public/window.svg
+./frontend/public/vercel.svg
+./frontend/public/file.svg
+./frontend/tsconfig.json
+./frontend/app
+./frontend/app/schedule
+./frontend/app/layout.tsx
+./frontend/app/favicon.ico
+./frontend/app/goals
+./frontend/app/page.tsx
+./frontend/app/globals.css
+./frontend/app/chat
+./frontend/app/today
+./frontend/app/providers.tsx
+./frontend/README.md
+./frontend/next-env.d.ts
+./frontend/lib
+./frontend/lib/types.ts
+./frontend/lib/store.ts
+./frontend/lib/api.ts
+./frontend/hooks
+./frontend/frontend@0.1.0
+
+
+
+=== BACKEND: package.json ===
+{
+  "name": "pepzi-backend",
+  "version": "1.0.0",
+  "description": "Pepzi AI Life OS - Backend API",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "pepzi",
+    "life-os",
+    "ai",
+    "scheduling"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "cors": "^2.8.5",
+    "date-fns": "^3.0.6",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "openai": "^4.24.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.6",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}
+
+--- backend/tsconfig.json ---
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+
+--- backend/src/index.ts ---
+import express, { Request, Response } from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import chatRoutes from './routes/chat';
+import goalRoutes from './routes/goals';
+import scheduleRoutes from './routes/schedule';
+import memoryRoutes from './routes/memory';
+import availabilityRoutes from './routes/availability';
+
+dotenv.config();
+
+const app = express();
+
+// CORS Configuration - Dynamic origin checker for Cloud Shell
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like curl, mobile apps)
+    if (!origin) return callback(null, true);
+    
+    // Remove query parameters from origin for matching
+    const cleanOrigin = origin.split('?')[0];
+    
+    // Allowed patterns
+    const allowedPatterns = [
+      /^https?:\/\/localhost:\d+$/,
+      /^https:\/\/3000-cs-291763640218-default\.cs-europe-west1-onse\.cloudshell\.dev$/,
+      /^https:\/\/3001-cs-291763640218-default\.cs-europe-west1-onse\.cloudshell\.dev$/,
+      /^https:\/\/8080-cs-291763640218-default\.cs-europe-west1-onse\.cloudshell\.dev$/
+    ];
+    
+    const isAllowed = allowedPatterns.some(pattern => pattern.test(cleanOrigin));
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log('❌ CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(express.json());
+
+// Routes
+app.use('/api/chat', chatRoutes);
+app.use('/api/goals', goalRoutes);
+app.use('/api/schedule', scheduleRoutes);
+app.use('/api/memory', memoryRoutes);
+app.use('/api/availability', availabilityRoutes);
+
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    service: 'pepzi-backend',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/', (_req: Request, res: Response) => {
+  res.json({
+    message: 'Pepzi Life OS API',
+
+Done.

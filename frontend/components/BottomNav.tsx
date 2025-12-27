@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, Calendar, Target, MessageCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useNavigation } from '@/components/NavigationContext';
 
 const navItems = [
   { href: '/', icon: Home, label: 'Home' },
@@ -16,8 +17,10 @@ const navItems = [
 export default function BottomNav() {
   const pathname = usePathname();
   const { user, profile } = useAuth();
+  const { isNavHidden } = useNavigation();
 
-  if (!user || pathname?.startsWith('/login') || pathname?.startsWith('/signup') || pathname?.startsWith('/onboarding')) {
+  // Hide nav when modal is open or on auth pages
+  if (isNavHidden || !user || pathname?.startsWith('/login') || pathname?.startsWith('/signup') || pathname?.startsWith('/onboarding')) {
     return null;
   }
 
@@ -29,8 +32,8 @@ export default function BottomNav() {
   };
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 md:hidden">
-      <div className="flex justify-around items-center h-16 px-2 max-w-lg mx-auto">
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 md:hidden safe-area-bottom">
+      <div className="flex justify-around items-center h-16 px-2 max-w-lg mx-auto pb-safe">
         {navItems.map((item) => {
           const isActive = item.href === '/' 
             ? pathname === '/' 

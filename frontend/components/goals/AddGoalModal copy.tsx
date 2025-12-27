@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
 import { X, Send } from 'lucide-react';
 import { goalsAPI } from '@/lib/api';
+import GoalPlanHeroCard from './GoalPlanHeroCard';
 
 interface Message {
   role: 'assistant' | 'user';
@@ -17,7 +18,7 @@ interface AddGoalModalProps {
   userId: string;
 }
 
-// What we *expect* (optionally) back from /goals/conversation
+// Response types from /goals/conversation
 interface ConversationGoal {
   name: string;
   category: string;
@@ -25,6 +26,10 @@ interface ConversationGoal {
   description?: string | null;
   weekly_hours?: number;
   total_hours?: number;
+  success_condition?: string;
+  current_level?: string;
+  preferred_days?: string[];
+  preferred_time?: 'morning' | 'afternoon' | 'evening' | 'any';
 }
 
 interface ConversationMilestone {
@@ -32,6 +37,25 @@ interface ConversationMilestone {
   hours?: number;
   week?: number;
   target_week?: number;
+  criteria?: string;
+}
+
+interface WeekPreview {
+  week_number: number;
+  focus: string;
+  sessions: Array<{
+    id?: string;
+    name: string;
+    description: string;
+    duration_mins: number;
+    notes?: string;
+  }>;
+}
+
+interface PreviewData {
+  week1: WeekPreview;
+  midWeek: WeekPreview;
+  finalWeek: WeekPreview;
 }
 
 interface ConversationResponse {
@@ -44,7 +68,37 @@ interface ConversationResponse {
   weekly_hours?: number;
   total_hours?: number;
   sessions_per_week?: number;
+  plan_edits?: { editInstructions: string };
+  preview?: PreviewData;
+  preferred_days?: string[];
+  preferred_time?: 'morning' | 'afternoon' | 'evening' | 'any';
+  // 🆕 New fields for schedule picker flow
+  show_schedule_picker?: boolean;
+  fit_check?: {
+    fits: boolean;
+    available_hours: number;
+    needed_hours: number;
+    existing_goal_hours?: number;
+    message: string;
+    availability: {
+      wake_time: string;
+      sleep_time: string;
+      work_schedule?: Record<string, { start: string; end: string }>;
+      daily_commute_mins?: number;
+    };
+    existing_blocks: Array<{
+      id: string;
+      goal_id?: string;
+      goal_name?: string;
+      type: string;
+      scheduled_start: string;
+      duration_mins: number;
+    }>;
+  };
 }
+
+// View states for the modal
+type ModalView = 'chat' | 'plan_card' | 'creating';
 
 export default function AddGoalModal({
   isOpen,
@@ -52,6 +106,10 @@ export default function AddGoalModal({
   onGoalCreated,
   userId,
 }: AddGoalModalProps) {
+  // ============================================================
+  // STATE
+  // ============================================================
+  
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
@@ -60,10 +118,10 @@ export default function AddGoalModal({
 Tell me what you want to achieve. Be as specific or vague as you like - I'll ask the right questions to build your plan.
 
 Examples:
-• "I want to run a sub-20 5K"
-• "I want to learn conversational Spanish in 6 months"
+• "I want to get more sleep"
+• "I want to learn the drums"
 • "I want to build a side project that makes £500/month"
-• "I want to get stronger - maybe bench 100kg?"
+• "I want to get more organised"
 
 What's your goal?`,
       timestamp: new Date(),
@@ -71,11 +129,42 @@ What's your goal?`,
   ]);
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-
-  // 🔁 full conversation_state that backend returns
   const [conversationState, setConversationState] = useState<any | null>(null);
+  
+  // View state
+  const [view, setView] = useState<ModalView>('chat');
+  
+  // 🆕 Data for the merged GoalPlanHeroCard
+  const [planCardData, setPlanCardData] = useState<{
+    goal: ConversationGoal;
+    milestones: ConversationMilestone[];
+    preview: PreviewData;
+    weekly_hours: number;
+    sessions_per_week: number;
+    session_duration_mins: number;
+    total_hours: number;
+    total_weeks: number;
+    preferred_days: string[];
+    preferred_time: 'morning' | 'afternoon' | 'evening' | 'any';
+    plan_edits?: { editInstructions: string };
+  } | null>(null);
+  
+  // 🆕 Fit check data for schedule picker
+  const [fitCheckData, setFitCheckData] = useState<ConversationResponse['fit_check'] | null>(null);
+
+  // Auto-scroll ref
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   if (!isOpen) return null;
+
+  // ============================================================
+  // HANDLERS
+  // ============================================================
 
   const handleSend = async () => {
     if (!input.trim() || isProcessing) return;
@@ -92,7 +181,6 @@ What's your goal?`,
     setIsProcessing(true);
 
     try {
-      // Type as ConversationResponse but allow unknown extra fields
       const data = (await goalsAPI.conversation(
         userId,
         currentInput,
@@ -110,15 +198,93 @@ What's your goal?`,
         setConversationState(data.state);
       }
 
-      // ✅ If complete, create goal + plan
+      // Extract prefs from either top-level or goal object
+      const goalPreferredDays =
+        data.preferred_days ??
+        data.goal?.preferred_days ??
+        data.state?.preferred_days ??
+        ['monday', 'wednesday', 'friday'];
+
+      const goalPreferredTime =
+        data.preferred_time ??
+        data.goal?.preferred_time ??
+        data.state?.preferred_time ??
+        'any';
+
+      // 🆕 CHECK FOR SCHEDULE PICKER / PLAN CARD
+      // This triggers when we have preview data OR show_schedule_picker flag
+      if ((data.preview || data.show_schedule_picker) && data.goal && data.milestones) {
+        console.log('📊 Plan data received, switching to GoalPlanHeroCard');
+        
+        const totalWeeks = data.state?.total_weeks || 
+          Math.ceil((data.total_hours || 50) / (data.weekly_hours || 5));
+        
+        const weeklyHours = data.weekly_hours ?? data.goal.weekly_hours ?? 5;
+        const sessionsPerWeek = data.sessions_per_week ?? 3;
+        const sessionDurationMins = Math.round((weeklyHours * 60) / sessionsPerWeek);
+        
+        setPlanCardData({
+          goal: data.goal,
+          milestones: data.milestones,
+          preview: data.preview || {
+            week1: { week_number: 1, focus: 'Foundation', sessions: [] },
+            midWeek: { week_number: Math.ceil(totalWeeks / 2), focus: 'Development', sessions: [] },
+            finalWeek: { week_number: totalWeeks, focus: 'Peak', sessions: [] },
+          },
+          weekly_hours: weeklyHours,
+          sessions_per_week: sessionsPerWeek,
+          session_duration_mins: sessionDurationMins,
+          total_hours: data.total_hours ?? data.goal.total_hours ?? 50,
+          total_weeks: totalWeeks,
+          preferred_days: goalPreferredDays,
+          preferred_time: goalPreferredTime,
+          plan_edits: data.plan_edits,
+        });
+        
+        // 🆕 Fetch or use provided fit check data
+        if (data.fit_check) {
+          setFitCheckData(data.fit_check);
+        } else {
+          // Fetch fit check from API
+          try {
+            const fitResponse = await goalsAPI.checkFit(userId, weeklyHours, sessionsPerWeek);
+            setFitCheckData(fitResponse);
+          } catch (fitErr) {
+            console.error('Failed to fetch fit check:', fitErr);
+            // Provide fallback fit check
+            setFitCheckData({
+              fits: true,
+              available_hours: 40,
+              needed_hours: weeklyHours,
+              message: 'Schedule check unavailable',
+              availability: {
+                wake_time: '07:00',
+                sleep_time: '23:00',
+              },
+              existing_blocks: [],
+            });
+          }
+        }
+        
+        setView('plan_card');
+        return;
+      }
+
+      // ✅ If complete (user approved via chat), create goal + plan
       if (data.complete && data.goal && data.milestones) {
+        setView('creating');
         await createGoalAndPlan(
           data.goal,
           data.milestones,
           data.tracking_criteria ?? [],
           data.weekly_hours ?? data.goal.weekly_hours ?? 3,
           data.total_hours ?? data.goal.total_hours ?? 20,
-          data.sessions_per_week ?? 3
+          data.sessions_per_week ?? 3,
+          data.plan_edits,
+          goalPreferredDays,
+          goalPreferredTime,
+          undefined, // placedSessions - not used in chat flow
+          data.preview // 🆕 Pass preview for session content
         );
       }
     } catch (error) {
@@ -134,19 +300,160 @@ What's your goal?`,
     }
   };
 
+  // 🆕 Handle confirmation from GoalPlanHeroCard
+  const handlePlanCardConfirm = async (result: {
+    placedSessions: Array<{
+      day: string;
+      hour: number;
+      minute: number;
+      duration_mins: number;
+      session_name: string;
+    }>;
+    preferredDays: string[];
+    preferredTime: 'morning' | 'afternoon' | 'evening' | 'any';
+    sessionEdits: Record<string, any>;
+  }) => {
+    if (!planCardData) return;
+    
+    setView('creating');
+    
+    // Build plan edits from session edits
+    const planEdits = planCardData.plan_edits || { editInstructions: '' };
+    if (Object.keys(result.sessionEdits).length > 0) {
+      planEdits.editInstructions += '\nSession customizations applied by user.';
+    }
+    
+    await createGoalAndPlan(
+      planCardData.goal,
+      planCardData.milestones,
+      [],
+      planCardData.weekly_hours,
+      planCardData.total_hours,
+      planCardData.sessions_per_week,
+      planEdits,
+      result.preferredDays,
+      result.preferredTime,
+      result.placedSessions, // 🆕 Pass placed sessions for exact scheduling
+      planCardData.preview // 🆕 Pass preview for session content
+    );
+  };
+
+  // 🆕 Handle request changes from GoalPlanHeroCard - go back to chat
+  const handleRequestChanges = async (feedback: string) => {
+    setView('chat');
+    
+    // Send the feedback as a new message
+    const userMessage: Message = {
+      role: 'user',
+      content: feedback,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setIsProcessing(true);
+    
+    try {
+      const data = await goalsAPI.conversation(
+        userId,
+        feedback,
+        conversationState || undefined
+      ) as ConversationResponse;
+      
+      const assistantMessage: Message = {
+        role: 'assistant',
+        content: data.message,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, assistantMessage]);
+      
+      if (data.state) {
+        setConversationState(data.state);
+      }
+      
+      // Check if new preview is returned
+      if (data.preview && data.goal && data.milestones) {
+        const goalPreferredDays =
+          data.preferred_days ?? data.goal?.preferred_days ?? ['monday', 'wednesday', 'friday'];
+        const goalPreferredTime =
+          data.preferred_time ?? data.goal?.preferred_time ?? 'any';
+        
+        const totalWeeks = data.state?.total_weeks || 
+          Math.ceil((data.total_hours || 50) / (data.weekly_hours || 5));
+        
+        const weeklyHours = data.weekly_hours ?? 5;
+        const sessionsPerWeek = data.sessions_per_week ?? 3;
+        
+        setPlanCardData({
+          goal: data.goal,
+          milestones: data.milestones,
+          preview: data.preview,
+          weekly_hours: weeklyHours,
+          sessions_per_week: sessionsPerWeek,
+          session_duration_mins: Math.round((weeklyHours * 60) / sessionsPerWeek),
+          total_hours: data.total_hours ?? 50,
+          total_weeks: totalWeeks,
+          preferred_days: goalPreferredDays,
+          preferred_time: goalPreferredTime,
+          plan_edits: data.plan_edits,
+        });
+        
+        // Re-fetch fit check
+        if (data.fit_check) {
+          setFitCheckData(data.fit_check);
+        }
+        
+        setView('plan_card');
+      }
+    } catch (error) {
+      console.error('Error sending feedback:', error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // 🆕 Handle cancel from GoalPlanHeroCard - go back to chat
+  const handleCancelPlanCard = () => {
+    setView('chat');
+    setPlanCardData(null);
+    setFitCheckData(null);
+    
+    // Add a message to indicate going back
+    const assistantMessage: Message = {
+      role: 'assistant',
+      content: "No problem! Let's start fresh. What goal would you like to work on?",
+      timestamp: new Date(),
+    };
+    setMessages([assistantMessage]);
+    setConversationState(null);
+  };
+
   const createGoalAndPlan = async (
     goalData: ConversationGoal,
     milestones: ConversationMilestone[],
     trackingCriteria: string[],
     weeklyHours: number,
     totalHours: number,
-    sessionsPerWeek: number
+    sessionsPerWeek: number,
+    planEdits?: { editInstructions: string },
+    preferredDays?: string[],
+    preferredTime?: 'morning' | 'afternoon' | 'evening' | 'any',
+    placedSessions?: Array<{
+      day: string;
+      hour: number;
+      minute: number;
+      duration_mins: number;
+      session_name: string;
+    }>,
+    preview?: PreviewData // 🆕 Add preview parameter
   ) => {
     try {
-      // Safe defaults
       const safeWeeklyHours = weeklyHours ?? 3;
       const safeTotalHours = totalHours ?? 20;
       const safeSessionsPerWeek = sessionsPerWeek ?? 3;
+
+      const finalPreferredDays =
+        preferredDays ?? goalData.preferred_days ?? ['monday', 'wednesday', 'friday'];
+      const finalPreferredTime =
+        preferredTime ?? goalData.preferred_time ?? 'any';
 
       // 1️⃣ Create the goal
       const goal = await goalsAPI.createGoal({
@@ -155,27 +462,36 @@ What's your goal?`,
         category: goalData.category,
         target_date: goalData.target_date || undefined,
         description: goalData.description ?? undefined,
+        preferred_days: finalPreferredDays,
+        preferred_time: finalPreferredTime,
       });
 
-      // Normalise milestones shape
+      // Normalise milestones
       const normalisedMilestones = milestones.map(m => ({
         name: m.name,
         hours: m.hours ?? 0,
         week: m.week ?? m.target_week,
+        criteria: m.criteria,
       }));
 
-      // 2️⃣ Attach training plan with milestones
+      // 2️⃣ Attach training plan (with placed sessions and preview if available)
       await goalsAPI.createPlanWithMilestones(goal.id, {
         milestones: normalisedMilestones,
         weekly_hours: safeWeeklyHours,
         sessions_per_week: safeSessionsPerWeek,
         total_hours: safeTotalHours,
         tracking_criteria: trackingCriteria,
-      });
+        plan_edits: planEdits,
+        preferred_days: finalPreferredDays,
+        preferred_time: finalPreferredTime,
+        placed_sessions: placedSessions,
+        preview: preview,
+      } as any);
 
       const successMessage: Message = {
         role: 'assistant',
-        content: '🎉 Your goal and training plan are ready! Closing this now...',
+        content:
+          '🎉 Your goal and training plan are ready! Closing this now...',
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, successMessage]);
@@ -186,9 +502,11 @@ What's your goal?`,
       }, 1500);
     } catch (error) {
       console.error('Error creating goal/plan:', error);
+      setView('chat');
       const errorMessage: Message = {
         role: 'assistant',
-        content: 'Something went wrong saving your plan. Please try again.',
+        content:
+          'Something went wrong saving your plan. Please try again.',
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -202,9 +520,93 @@ What's your goal?`,
     }
   };
 
+  // Helper to render message content with markdown-like formatting
+  const renderMessageContent = (content: string) => {
+    const lines = content.split('\n');
+    return lines.map((line, i) => {
+      let processed = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+      if (line.includes('├──') || line.includes('└──') || line.includes('│')) {
+        return (
+          <div
+            key={i}
+            className="font-mono text-sm"
+            dangerouslySetInnerHTML={{ __html: processed }}
+          />
+        );
+      }
+
+      return (
+        <div
+          key={i}
+          dangerouslySetInnerHTML={{ __html: processed }}
+        />
+      );
+    });
+  };
+
+  // ============================================================
+  // RENDER
+  // ============================================================
+
+  // 🆕 VIEW: PLAN_CARD - Show the merged GoalPlanHeroCard
+  if (view === 'plan_card' && planCardData && fitCheckData) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="w-full max-w-4xl max-h-[95vh]">
+          <GoalPlanHeroCard
+            data={{
+              goal: {
+                name: planCardData.goal.name,
+                category: planCardData.goal.category,
+                target_date: planCardData.goal.target_date || 
+                  new Date(Date.now() + planCardData.total_weeks * 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                success_condition: planCardData.goal.success_condition,
+              },
+              plan: {
+                weekly_hours: planCardData.weekly_hours,
+                sessions_per_week: planCardData.sessions_per_week,
+                session_duration_mins: planCardData.session_duration_mins,
+                total_weeks: planCardData.total_weeks,
+                total_hours: planCardData.total_hours,
+              },
+              preview: planCardData.preview,
+              milestones: planCardData.milestones.map((m, i) => ({
+                name: m.name,
+                target_week: m.week ?? m.target_week ?? Math.round(((i + 1) * planCardData.total_weeks) / planCardData.milestones.length),
+                criteria: m.criteria,
+              })),
+            }}
+            fitCheck={fitCheckData}
+            onConfirm={handlePlanCardConfirm}
+            onRequestChanges={handleRequestChanges}
+            onCancel={handleCancelPlanCard}
+            isLoading={false}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // VIEW: CREATING - Show loading state
+  if (view === 'creating') {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-2xl w-full max-w-md p-8 text-center shadow-2xl">
+          <div className="animate-spin w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Creating Your Plan</h2>
+          <p className="text-gray-500">
+            Generating your personalized training schedule...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // VIEW: CHAT - Show the conversation
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl">
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div>
@@ -226,7 +628,9 @@ What's your goal?`,
           {messages.map((msg, idx) => (
             <div
               key={idx}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              className={`flex ${
+                msg.role === 'user' ? 'justify-end' : 'justify-start'
+              }`}
             >
               <div
                 className={`max-w-[85%] rounded-2xl px-4 py-3 ${
@@ -246,8 +650,8 @@ What's your goal?`,
                     })}
                   </span>
                 </div>
-                <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                  {msg.content}
+                <div className="text-sm leading-relaxed whitespace-pre-wrap space-y-1">
+                  {renderMessageContent(msg.content)}
                 </div>
               </div>
             </div>
@@ -275,6 +679,7 @@ What's your goal?`,
               </div>
             </div>
           )}
+          <div ref={messagesEndRef} />
         </div>
 
         {/* Input */}
@@ -287,7 +692,7 @@ What's your goal?`,
               onKeyDown={handleKeyDown}
               placeholder="Type your message..."
               disabled={isProcessing}
-              className="flex-1 px-4 py-3 border border-gray-200 rounded-full focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none disabled:opacity-50 bg-white"
+              className="flex-1 px-4 py-3 border border-gray-200 rounded-full focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none disabled:opacity-50 bg-white text-gray-900 placeholder:text-gray-400"
             />
             <button
               onClick={handleSend}

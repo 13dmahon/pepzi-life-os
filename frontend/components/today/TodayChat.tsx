@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Check, Clock, Calendar, RotateCcw, Loader2 } from 'lucide-react';
+import { Send, Sparkles, Check, Clock, Calendar, RotateCcw, Loader2, X } from 'lucide-react';
 import { scheduleAPI } from '@/lib/api';
 
 interface Message {
   id: string;
-  type: 'assistant' | 'user' | 'missed_session' | 'daily_summary' | 'action';
+  type: 'assistant' | 'user' | 'missed_session' | 'daily_summary' | 'action' | 'error';
   content: string;
   timestamp: Date;
   sessionId?: string;
@@ -43,10 +43,9 @@ interface TodayChatProps {
   onTaskComplete?: (taskId: string, notes: string) => void;
 }
 
-const API_URL = 'https://pepzi-backend-1029121217006.europe-west2.run.app';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://pepzi-backend-1029121217006.europe-west2.run.app';
 
 export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, onTaskComplete }: TodayChatProps) {
-  // Filter out non-training blocks
   const tasks = allTasks.filter((t) => 
     t.goal_id && !['work', 'commute', 'event', 'sleep', 'social'].includes(t.type || t.category || '')
   );
@@ -84,7 +83,6 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
     else if (hour < 17) greeting = 'Hey!';
     else greeting = 'Evening!';
 
-    // Daily summary
     let summaryText = `${greeting} I'm Pepzi, your AI assistant. `;
     
     if (pendingTasks.length === 0 && completedTasks.length > 0) {
@@ -105,7 +103,6 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
       timestamp: now,
     });
 
-    // Check for missed sessions
     const missedSessions = pendingTasks.filter(task => {
       const scheduledTime = new Date(task.scheduled_time);
       const sessionEnd = new Date(scheduledTime.getTime() + task.duration_mins * 60000);
@@ -134,7 +131,6 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
     setMessages(newMessages);
   };
 
-  // Handle button clicks on missed session cards
   const handleSessionAction = async (action: string, sessionId: string, sessionName: string) => {
     if (action === 'did_it') {
       const task = tasks.find(t => t.id === sessionId);
@@ -241,7 +237,16 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
     setConversationHistory(prev => [...prev, { type: 'assistant', content }]);
   };
 
-  // AI-powered chat submission
+  const addErrorMessage = (content: string) => {
+    const newMsg: Message = {
+      id: `error-${Date.now()}`,
+      type: 'error',
+      content,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, newMsg]);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -249,7 +254,6 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
     const userMessage = input.trim();
     setInput('');
 
-    // Add user message to UI
     const userMsg: Message = {
       id: `user-${Date.now()}`,
       type: 'user',
@@ -262,7 +266,6 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
     setIsLoading(true);
 
     try {
-      // Call AI chat endpoint
       const response = await fetch(`${API_URL}/api/ai-chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -283,23 +286,29 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
       });
 
       if (!response.ok) {
-        throw new Error('AI request failed');
+        const errorText = await response.text();
+        console.error(`API Error ${response.status}:`, errorText);
+        throw new Error(`API returned ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
       
-      // Add AI response
-      addAssistantMessage(data.response, data.actions);
+      if (data.response) {
+        addAssistantMessage(data.response, data.actions);
+      } else if (data.error) {
+        addErrorMessage(data.error);
+      } else {
+        addAssistantMessage("Done! ✓");
+      }
       
-      // If any actions were taken, refresh the task list
       if (data.actions && data.actions.length > 0) {
         onActivityLogged?.();
       }
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('AI Chat error:', error);
-      // Fallback to simple response
-      addAssistantMessage("I'm having trouble connecting right now. Try again in a moment, or use the buttons on your task cards.");
+      const errorDetails = error.message || 'Unknown error';
+      addErrorMessage(`Connection issue: ${errorDetails}. Try using the buttons on task cards instead.`);
     } finally {
       setIsLoading(false);
     }
@@ -307,17 +316,42 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
 
   const formatTime = (date: Date) => date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
+  // Inline styles for modal overlay
+  const overlayStyle: React.CSSProperties = {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    zIndex: 99999,
+  };
+
+  // Inline styles for modal card - ABSOLUTE with TOP
+  const modalCardStyle: React.CSSProperties = {
+    position: 'absolute',
+    top: '80px',
+    left: '16px',
+    right: '16px',
+    maxWidth: '400px',
+    margin: '0 auto',
+    backgroundColor: 'white',
+    borderRadius: '24px',
+    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+    overflow: 'hidden',
+  };
+
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="border-b bg-gradient-to-r from-purple-500 to-blue-500 px-4 py-3 flex-shrink-0">
+      <div className="backdrop-blur-xl bg-white/60 border-b border-white/40 px-4 py-3 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 bg-white/50 border border-white/60 rounded-full flex items-center justify-center">
+            <Sparkles className="w-5 h-5 text-slate-500" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">Pepzi</h2>
-            <p className="text-xs text-white/80">Your AI PA</p>
+            <h2 className="text-lg font-semibold text-slate-700">Pepzi</h2>
+            <p className="text-xs text-slate-400">Your AI PA</p>
           </div>
         </div>
       </div>
@@ -326,42 +360,50 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.map((message) => (
           <div key={message.id}>
-            {/* User message */}
             {message.type === 'user' && (
               <div className="flex justify-end">
-                <div className="max-w-[80%] bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-2xl rounded-br-md px-4 py-2">
+                <div className="max-w-[80%] bg-slate-700 text-white rounded-2xl rounded-br-md px-4 py-2">
                   <p className="text-sm">{message.content}</p>
                   <p className="text-xs text-white/60 mt-1">{formatTime(message.timestamp)}</p>
                 </div>
               </div>
             )}
 
-            {/* Assistant messages */}
             {(message.type === 'assistant' || message.type === 'daily_summary' || message.type === 'action') && (
               <div className="flex justify-start">
-                <div className={`max-w-[85%] rounded-2xl rounded-bl-md px-4 py-2 ${
-                  message.type === 'action' ? 'bg-green-50 border border-green-200' : 'bg-gray-100'
+                <div className={`max-w-[85%] rounded-2xl rounded-bl-md px-4 py-2 backdrop-blur-sm ${
+                  message.type === 'action' 
+                    ? 'bg-emerald-50/80 border border-emerald-200/50' 
+                    : 'bg-white/70 border border-white/60'
                 }`}>
-                  <p className="text-sm text-gray-800 whitespace-pre-line">{message.content}</p>
+                  <p className="text-sm text-slate-700 whitespace-pre-line">{message.content}</p>
                   {message.actions && message.actions.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-green-200">
-                      <p className="text-xs text-green-600 font-medium">
+                    <div className="mt-2 pt-2 border-t border-emerald-200/50">
+                      <p className="text-xs text-emerald-600 font-medium">
                         ✓ {message.actions.length} action{message.actions.length > 1 ? 's' : ''} completed
                       </p>
                     </div>
                   )}
-                  <p className="text-xs text-gray-400 mt-1">{formatTime(message.timestamp)}</p>
+                  <p className="text-xs text-slate-400 mt-1">{formatTime(message.timestamp)}</p>
                 </div>
               </div>
             )}
 
-            {/* Missed session nudge */}
+            {message.type === 'error' && (
+              <div className="flex justify-start">
+                <div className="max-w-[85%] rounded-2xl rounded-bl-md px-4 py-2 backdrop-blur-sm bg-rose-50/80 border border-rose-200/50">
+                  <p className="text-sm text-rose-700 whitespace-pre-line">{message.content}</p>
+                  <p className="text-xs text-rose-400 mt-1">{formatTime(message.timestamp)}</p>
+                </div>
+              </div>
+            )}
+
             {message.type === 'missed_session' && (
               <div className="flex justify-start">
-                <div className="max-w-[90%] bg-orange-50 border border-orange-200 rounded-2xl rounded-bl-md px-4 py-3">
+                <div className="max-w-[90%] backdrop-blur-sm bg-amber-50/80 border border-amber-200/50 rounded-2xl rounded-bl-md px-4 py-3">
                   <div className="flex items-start gap-2 mb-2">
-                    <Clock className="w-4 h-4 text-orange-500 mt-0.5" />
-                    <p className="text-sm text-gray-800">{message.content}</p>
+                    <Clock className="w-4 h-4 text-amber-500 mt-0.5" />
+                    <p className="text-sm text-slate-700">{message.content}</p>
                   </div>
                   {message.buttons && (
                     <div className="flex flex-wrap gap-2 mt-3">
@@ -370,10 +412,12 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
                           key={i}
                           onClick={() => handleSessionAction(btn.action, message.sessionId!, message.sessionName!)}
                           disabled={isLoading}
-                          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50 ${
-                            btn.variant === 'primary' ? 'bg-green-500 text-white hover:bg-green-600' :
-                            btn.variant === 'danger' ? 'bg-gray-200 text-gray-600 hover:bg-red-100 hover:text-red-600' :
-                            'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                          className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all disabled:opacity-50 ${
+                            btn.variant === 'primary' 
+                              ? 'bg-emerald-500 text-white hover:bg-emerald-600' 
+                              : btn.variant === 'danger' 
+                                ? 'bg-white/60 text-slate-500 hover:bg-rose-100 hover:text-rose-600 border border-white/60' 
+                                : 'bg-white/60 border border-white/60 text-slate-600 hover:bg-white/80'
                           }`}
                         >
                           {btn.label}
@@ -381,20 +425,19 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
                       ))}
                     </div>
                   )}
-                  <p className="text-xs text-gray-400 mt-2">{formatTime(message.timestamp)}</p>
+                  <p className="text-xs text-slate-400 mt-2">{formatTime(message.timestamp)}</p>
                 </div>
               </div>
             )}
           </div>
         ))}
 
-        {/* Loading indicator */}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3">
+            <div className="backdrop-blur-sm bg-white/70 border border-white/60 rounded-2xl rounded-bl-md px-4 py-3">
               <div className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 text-purple-500 animate-spin" />
-                <span className="text-sm text-gray-500">Thinking...</span>
+                <Loader2 className="w-4 h-4 text-slate-500 animate-spin" />
+                <span className="text-sm text-slate-500">Thinking...</span>
               </div>
             </div>
           </div>
@@ -403,7 +446,7 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
       </div>
 
       {/* Input */}
-      <div className="border-t bg-white px-4 py-3 flex-shrink-0">
+      <div className="backdrop-blur-xl bg-white/60 border-t border-white/40 px-4 py-3 flex-shrink-0">
         <form onSubmit={handleSubmit} className="flex gap-2">
           <input
             ref={inputRef}
@@ -411,77 +454,174 @@ export default function TodayChat({ userId, tasks: allTasks, onActivityLogged, o
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Chat with Pepzi..."
-            className="flex-1 px-4 py-2 rounded-full border border-gray-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none transition-all text-sm text-gray-900 placeholder:text-gray-400"
+            className="flex-1 px-4 py-2.5 rounded-2xl border border-white/60 bg-white/50 focus:bg-white/70 focus:border-slate-300 focus:ring-2 focus:ring-slate-200 outline-none transition-all text-sm text-slate-700 placeholder:text-slate-400"
             disabled={isLoading}
           />
           <button
             type="submit"
             disabled={isLoading || !input.trim()}
-            className="p-2 bg-gradient-to-br from-purple-500 to-blue-500 text-white rounded-full hover:shadow-lg transition-all disabled:opacity-50"
+            className="p-2.5 bg-slate-700 text-white rounded-2xl hover:bg-slate-600 hover:shadow-lg transition-all disabled:opacity-50"
           >
             <Send className="w-5 h-5" />
           </button>
         </form>
       </div>
 
-      {/* Notes Modal */}
+      {/* ============================================================ */}
+      {/* NOTES MODAL - Card has absolute positioning with top: 80px */}
+      {/* ============================================================ */}
       {showNotesModal && activeTask && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
-            <div className="p-4 border-b">
-              <h3 className="text-lg font-bold text-gray-900">Nice work! 🎉</h3>
-              <p className="text-sm text-gray-500">{activeTask.name}</p>
+        <div 
+          style={overlayStyle}
+          onClick={() => { setShowNotesModal(false); setActiveTask(null); }}
+        >
+          <div 
+            style={modalCardStyle}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#334155', margin: 0 }}>Nice work! 🎉</h3>
+                  <p style={{ fontSize: '14px', color: '#64748b', margin: '4px 0 0 0' }}>{activeTask.name}</p>
+                </div>
+                <button 
+                  onClick={() => { setShowNotesModal(false); setActiveTask(null); }}
+                  style={{ padding: '8px', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                >
+                  <X style={{ width: '20px', height: '20px', color: '#94a3b8' }} />
+                </button>
+              </div>
             </div>
-            <div className="p-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">How did it go? (optional)</label>
+            
+            {/* Notes input */}
+            <div style={{ padding: '16px' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#475569', marginBottom: '8px' }}>
+                How did it go? (optional)
+              </label>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Any notes about this session..."
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none resize-none text-sm"
-                rows={3}
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '12px',
+                  backgroundColor: '#f8fafc',
+                  fontSize: '14px',
+                  color: '#334155',
+                  resize: 'none',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+                rows={2}
                 autoFocus
               />
             </div>
-            <div className="p-4 border-t flex gap-3">
+            
+            {/* Buttons */}
+            <div style={{ padding: '16px', borderTop: '1px solid #e2e8f0', display: 'flex', gap: '12px' }}>
               <button 
                 onClick={() => { setShowNotesModal(false); setActiveTask(null); }} 
-                className="flex-1 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 font-medium"
+                style={{
+                  flex: 1,
+                  padding: '14px 16px',
+                  border: '1px solid #e2e8f0',
+                  backgroundColor: 'white',
+                  color: '#475569',
+                  borderRadius: '12px',
+                  fontSize: '16px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                }}
               >
                 Cancel
               </button>
               <button 
                 onClick={handleCompleteWithNotes} 
-                disabled={isLoading} 
-                className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium flex items-center justify-center gap-2 disabled:opacity-50"
+                disabled={isLoading}
+                style={{
+                  flex: 1,
+                  padding: '14px 16px',
+                  border: 'none',
+                  backgroundColor: '#10b981',
+                  color: 'white',
+                  borderRadius: '12px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  opacity: isLoading ? 0.5 : 1,
+                }}
               >
-                <Check className="w-4 h-4" />Log It
+                <Check style={{ width: '20px', height: '20px' }} />
+                Log It
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Reschedule Options Modal */}
+      {/* ============================================================ */}
+      {/* RESCHEDULE MODAL */}
+      {/* ============================================================ */}
       {showRescheduleOptions && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl">
-            <div className="p-4 border-b">
-              <h3 className="text-lg font-bold text-gray-900">When works better?</h3>
+        <div 
+          style={overlayStyle}
+          onClick={() => { setShowRescheduleOptions(false); setRescheduleTaskId(null); }}
+        >
+          <div 
+            style={{...modalCardStyle, maxWidth: '360px'}}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#334155', margin: 0 }}>When works better?</h3>
+                <button 
+                  onClick={() => { setShowRescheduleOptions(false); setRescheduleTaskId(null); }}
+                  style={{ padding: '8px', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                >
+                  <X style={{ width: '20px', height: '20px', color: '#94a3b8' }} />
+                </button>
+              </div>
             </div>
-            <div className="p-4 space-y-2">
-              <button onClick={() => handleReschedule('later_today')} disabled={isLoading} className="w-full px-4 py-3 text-left border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-3">
-                <Clock className="w-5 h-5 text-gray-400" /><span className="font-medium">Later today</span>
-              </button>
-              <button onClick={() => handleReschedule('tomorrow')} disabled={isLoading} className="w-full px-4 py-3 text-left border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-3">
-                <Calendar className="w-5 h-5 text-gray-400" /><span className="font-medium">Tomorrow</span>
-              </button>
-              <button onClick={() => handleReschedule('pick')} disabled={isLoading} className="w-full px-4 py-3 text-left border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-3">
-                <RotateCcw className="w-5 h-5 text-gray-400" /><span className="font-medium">Tell me when...</span>
-              </button>
-            </div>
-            <div className="p-4 border-t">
-              <button onClick={() => { setShowRescheduleOptions(false); setRescheduleTaskId(null); }} className="w-full px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancel</button>
+            <div style={{ padding: '12px' }}>
+              {[
+                { option: 'later_today' as const, icon: Clock, label: 'Later today' },
+                { option: 'tomorrow' as const, icon: Calendar, label: 'Tomorrow' },
+                { option: 'pick' as const, icon: RotateCcw, label: 'Tell me when...' },
+              ].map(({ option, icon: Icon, label }) => (
+                <button 
+                  key={option}
+                  onClick={() => handleReschedule(option)} 
+                  disabled={isLoading}
+                  style={{
+                    width: '100%',
+                    padding: '14px 16px',
+                    marginBottom: '8px',
+                    border: '1px solid #e2e8f0',
+                    backgroundColor: '#f8fafc',
+                    borderRadius: '12px',
+                    fontSize: '16px',
+                    fontWeight: '500',
+                    color: '#334155',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    textAlign: 'left',
+                    opacity: isLoading ? 0.5 : 1,
+                  }}
+                >
+                  <Icon style={{ width: '20px', height: '20px', color: '#94a3b8' }} />
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
         </div>

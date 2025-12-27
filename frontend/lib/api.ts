@@ -11,7 +11,10 @@ export const api = axios.create({
   timeout: 120000,
 });
 
-// Types
+// ============================================================
+// TYPES
+// ============================================================
+
 export interface ChatMessage {
   user_id: string;
   message: string;
@@ -56,6 +59,8 @@ export interface TodayTask {
   tracked_data?: Record<string, any>;
   notes?: string;
   previous_notes?: string;
+  resource_link?: string;
+  resource_link_label?: string;
   tracking_requirements: Array<{
     key: string;
     label: string;
@@ -85,6 +90,9 @@ export interface GoalProgress {
   status: 'on_track' | 'slightly_behind' | 'behind';
 }
 
+// 🆕 Shared preferred time type
+export type PreferredTime = 'morning' | 'afternoon' | 'evening' | 'any';
+
 export interface Goal {
   id: string;
   user_id: string;
@@ -98,8 +106,10 @@ export interface Goal {
   created_at?: string;
   micro_goals?: any[];
   preferred_days?: string[];
-  preferred_time?: 'morning' | 'afternoon' | 'evening' | 'any';
+  preferred_time?: PreferredTime;
   intensity?: string;
+  resource_link?: string;
+  resource_link_label?: string;
 }
 
 export interface ScheduleBlock {
@@ -114,7 +124,7 @@ export interface ScheduleBlock {
   created_by?: string;
   completed_at?: string;
   original_scheduled_start?: string;
-  goals?: { name: string; category?: string };
+  goals?: { name: string; category?: string; resource_link?: string; resource_link_label?: string };
 }
 
 export interface UserAvailability {
@@ -141,6 +151,16 @@ export interface PlanEdits {
   editInstructions: string;
 }
 
+// 🆕 Placed session from schedule picker
+export interface PlacedSession {
+  day: string;
+  hour: number;
+  minute: number;
+  duration_mins: number;
+  session_name: string;
+}
+
+// 🆕 Plan payload now carries scheduling prefs AND placed_sessions
 export interface CreatePlanPayload {
   milestones: Milestone[];
   weekly_hours: number;
@@ -148,12 +168,39 @@ export interface CreatePlanPayload {
   total_hours: number;
   tracking_criteria: string[];
   plan_edits?: PlanEdits;
+  preferred_days?: string[];
+  preferred_time?: PreferredTime;
+  placed_sessions?: PlacedSession[]; // 🆕 User's exact session placements
 }
 
+// 🆕 Fit check response from /api/goals/check-fit
+export interface FitCheckResponse {
+  fits: boolean;
+  available_hours: number;
+  needed_hours: number;
+  existing_goal_hours?: number;
+  message: string;
+  availability: {
+    wake_time: string;
+    sleep_time: string;
+    work_schedule?: Record<string, { start: string; end: string }>;
+    daily_commute_mins?: number;
+  };
+  existing_blocks: Array<{
+    id: string;
+    goal_id?: string;
+    goal_name?: string;
+    type: string;
+    scheduled_start: string;
+    duration_mins: number;
+  }>;
+}
+
+// 🆕 Conversation response also surfaces prefs and fit check
 export interface ConversationResponse {
   complete: boolean;
   message: string;
-  goal?: any;
+  goal?: Goal | any;
   milestones?: Milestone[];
   tracking_criteria?: string[];
   weekly_hours?: number;
@@ -162,6 +209,11 @@ export interface ConversationResponse {
   state?: any;
   plan_edits?: PlanEdits;
   preview?: any;
+  preferred_days?: string[];
+  preferred_time?: PreferredTime;
+  // 🆕 New fields for schedule picker flow
+  show_schedule_picker?: boolean;
+  fit_check?: FitCheckResponse;
 }
 
 export interface ScheduleGenerateResponse {
@@ -227,52 +279,118 @@ export const goalsAPI = {
     const response = await api.get('/api/goals', { params: { user_id: userId } });
     return response.data.goals;
   },
+  
+  // Supports preferred_days / preferred_time via Partial<Goal>
   createGoal: async (goal: Partial<Goal> & { user_id: string }): Promise<Goal> => {
     const response = await api.post('/api/goals', goal);
     return response.data.goal;
   },
+  
   extractFromDreams: async (userId: string, text: string): Promise<Goal[]> => {
     const response = await api.post('/api/goals/from-dreams', { user_id: userId, text });
     return response.data.goals;
   },
+  
   generatePlan: async (goalId: string, context?: string): Promise<any> => {
     const response = await api.post(`/api/goals/${goalId}/plan`, { context });
     return response.data;
   },
+  
   generateTrainingPlan: async (goalId: string, context?: string): Promise<any> => {
     const response = await api.post(`/api/goals/${goalId}/generate-plan`, { context });
     return response.data;
   },
+  
   conversation: async (userId: string, message: string, conversationState?: any): Promise<ConversationResponse> => {
     const response = await api.post('/api/goals/conversation', { user_id: userId, message, conversation_state: conversationState });
     return response.data;
   },
+  
+  // 🆕 Check if a goal's hours fit in user's schedule
+  checkFit: async (
+    userId: string,
+    weeklyHours: number,
+    sessionsPerWeek: number
+  ): Promise<FitCheckResponse> => {
+    const response = await api.post('/api/goals/check-fit', {
+      user_id: userId,
+      weekly_hours: weeklyHours,
+      sessions_per_week: sessionsPerWeek,
+    });
+    return response.data;
+  },
+  
+  // 🆕 payload now typed with scheduling prefs AND placed_sessions
   createPlanWithMilestones: async (goalId: string, payload: CreatePlanPayload): Promise<any> => {
     const response = await api.post(`/api/goals/${goalId}/create-plan-with-milestones`, payload, { timeout: 300000 });
     return response.data;
   },
+  
   deleteGoal: async (goalId: string): Promise<void> => {
     await api.delete(`/api/goals/${goalId}`);
   },
+  
   deletePlan: async (goalId: string): Promise<void> => {
     await api.delete(`/api/goals/${goalId}/plan`);
   },
-  getGoalSessions: async (goalId: string, limit?: number): Promise<{ sessions: Array<{ id: string; name: string; scheduled_start: string; completed_at: string; duration_mins: number; tracked_data: Record<string, any> }>; aggregates: { total_sessions: number; total_hours: number; total_minutes: number; avg_effort: number | null; total_distance_km: number | null } }> => {
+  
+  getGoalSessions: async (goalId: string, limit?: number): Promise<{ 
+    sessions: Array<{ 
+      id: string; 
+      name: string; 
+      scheduled_start: string; 
+      completed_at: string; 
+      duration_mins: number; 
+      tracked_data: Record<string, any> 
+    }>; 
+    aggregates: { 
+      total_sessions: number; 
+      total_hours: number; 
+      total_minutes: number; 
+      avg_effort: number | null; 
+      total_distance_km: number | null 
+    } 
+  }> => {
     const response = await api.get(`/api/goals/${goalId}/sessions`, { params: { limit } });
     return response.data;
   },
-  getAllProgress: async (userId: string): Promise<{ progress: Record<string, { total_sessions: number; total_minutes: number; total_hours: number }> }> => {
+  
+  getAllProgress: async (userId: string): Promise<{ 
+    progress: Record<string, { 
+      total_sessions: number; 
+      total_minutes: number; 
+      total_hours: number 
+    }> 
+  }> => {
     const response = await api.get('/api/goals/all-progress', { params: { user_id: userId } });
     return response.data;
   },
+  
   updateIntensity: async (goalId: string, intensity: string): Promise<any> => {
     const response = await api.patch(`/api/goals/${goalId}/intensity`, { intensity });
     return response.data;
   },
-  updatePreferences: async (goalId: string, data: { preferred_days?: string[]; weekly_hours?: number; sessions_per_week?: number }): Promise<any> => {
+  
+  // 🆕 allow updating preferred_time as well
+  updatePreferences: async (goalId: string, data: { 
+    preferred_days?: string[]; 
+    preferred_time?: PreferredTime; 
+    weekly_hours?: number; 
+    sessions_per_week?: number 
+  }): Promise<any> => {
     const response = await api.patch(`/api/goals/${goalId}/preferences`, data);
     return response.data;
   },
+  
+  // 🆕 Update resource link for a goal
+  updateResourceLink: async (goalId: string, resourceLink: string, resourceLinkLabel?: string): Promise<Goal> => {
+    const response = await api.patch(`/api/goals/${goalId}/resource-link`, { 
+      resource_link: resourceLink || null,
+      resource_link_label: resourceLinkLabel || null
+    });
+    return response.data.goal;
+  },
+  
   getIntensifyPreview: async (goalId: string): Promise<{
     success: boolean;
     preview: Array<{
@@ -286,6 +404,7 @@ export const goalsAPI = {
     const response = await api.post(`/api/goals/${goalId}/intensify-preview`);
     return response.data;
   },
+  
   applyIntensify: async (goalId: string, preview: any[]): Promise<{
     success: boolean;
     sessions_updated: number;
@@ -294,6 +413,7 @@ export const goalsAPI = {
     const response = await api.post(`/api/goals/${goalId}/intensify-apply`, { preview });
     return response.data;
   },
+  
   getTimeBudget: async (userId: string): Promise<{
     work_hours: number;
     commute_hours: number;
@@ -306,6 +426,7 @@ export const goalsAPI = {
     const response = await api.get('/api/goals/time-budget', { params: { user_id: userId } });
     return response.data;
   },
+  
   getGoalSchedule: async (goalId: string): Promise<{
     sessions: any[];
     sessions_by_week: Record<number, any[]>;
@@ -325,14 +446,17 @@ export const scheduleAPI = {
     const response = await api.get('/api/schedule', { params: { user_id: userId, start_date: startDate, end_date: endDate } });
     return response.data.blocks;
   },
+  
   getToday: async (userId: string): Promise<ScheduleBlock[]> => {
     const response = await api.get('/api/schedule/today', { params: { user_id: userId } });
     return response.data.blocks;
   },
+  
   getBlocks: async (userId: string, startDate: string, endDate: string): Promise<{ blocks: ScheduleBlock[] }> => {
     const response = await api.get('/api/schedule', { params: { user_id: userId, start_date: startDate, end_date: endDate } });
     return response.data;
   },
+  
   getWeek: async (userId: string, weekOffset: number = 0): Promise<ScheduleBlock[]> => {
     const today = new Date();
     const startOfWeek = new Date(today);
@@ -340,13 +464,28 @@ export const scheduleAPI = {
     startOfWeek.setHours(0, 0, 0, 0);
     const endOfWeek = new Date(startOfWeek);
     endOfWeek.setDate(startOfWeek.getDate() + 7);
-    const response = await api.get('/api/schedule', { params: { user_id: userId, start_date: startOfWeek.toISOString().split('T')[0], end_date: endOfWeek.toISOString().split('T')[0] } });
+    const response = await api.get('/api/schedule', { 
+      params: { 
+        user_id: userId, 
+        start_date: startOfWeek.toISOString().split('T')[0], 
+        end_date: endOfWeek.toISOString().split('T')[0] 
+      } 
+    });
     return response.data.blocks;
   },
-  createBlock: async (block: { user_id: string; goal_id?: string; type: string; scheduled_start: string; duration_mins: number; notes?: string }): Promise<ScheduleBlock> => {
+  
+  createBlock: async (block: { 
+    user_id: string; 
+    goal_id?: string; 
+    type: string; 
+    scheduled_start: string; 
+    duration_mins: number; 
+    notes?: string 
+  }): Promise<ScheduleBlock> => {
     const response = await api.post('/api/schedule', block);
     return response.data.block;
   },
+  
   createRecurringBlock: async (data: {
     user_id: string;
     type: string;
@@ -358,49 +497,85 @@ export const scheduleAPI = {
     const response = await api.post('/api/schedule/recurring', data);
     return response.data;
   },
-  updateBlock: async (blockId: string, updates: { scheduled_start?: string; duration_mins?: number; notes?: string }): Promise<ScheduleBlock> => {
+  
+  updateBlock: async (blockId: string, updates: { 
+    scheduled_start?: string; 
+    duration_mins?: number; 
+    notes?: string 
+  }): Promise<ScheduleBlock> => {
     const response = await api.patch(`/api/schedule/${blockId}`, updates);
     return response.data.block;
   },
+  
   updateBlockWithFuture: async (blockId: string, scheduledStart: string, applyToFuture: boolean): Promise<{ block: ScheduleBlock; updatedCount: number }> => {
-    const response = await api.patch(`/api/schedule/${blockId}/with-future`, { scheduled_start: scheduledStart, apply_to_future: applyToFuture });
+    const response = await api.patch(`/api/schedule/${blockId}/with-future`, { 
+      scheduled_start: scheduledStart, 
+      apply_to_future: applyToFuture 
+    });
     return response.data;
   },
+  
   completeBlock: async (blockId: string): Promise<ScheduleBlock> => {
     const response = await api.patch(`/api/schedule/${blockId}/complete`);
     return response.data.block;
   },
+  
   deleteBlock: async (blockId: string): Promise<void> => {
     await api.delete(`/api/schedule/${blockId}`);
   },
+  
   autoGenerate: async (userId: string): Promise<ScheduleGenerateResponse> => {
     const response = await api.post('/api/schedule/auto-generate', { user_id: userId });
     return response.data;
   },
-  generateForGoal: async (userId: string, goalId: string, preferredDays?: string[], preferredTime?: string): Promise<{ success: boolean; blocksCreated: number; warning: string | null; message: string }> => {
-    const response = await api.post('/api/schedule/generate-for-goal', { user_id: userId, goal_id: goalId, preferred_days: preferredDays, preferred_time: preferredTime }, { timeout: 180000 });
+  
+  // 🆕 Now supports placed_sessions for exact scheduling
+  generateForGoal: async (
+    userId: string,
+    goalId: string,
+    preferredDays?: string[],
+    preferredTime?: PreferredTime,
+    placedSessions?: PlacedSession[]
+  ): Promise<{ success: boolean; blocksCreated: number; warning: string | null; message: string }> => {
+    const response = await api.post(
+      '/api/schedule/generate-for-goal',
+      { 
+        user_id: userId, 
+        goal_id: goalId, 
+        preferred_days: preferredDays, 
+        preferred_time: preferredTime,
+        placed_sessions: placedSessions
+      },
+      { timeout: 180000 }
+    );
     return response.data;
   },
+  
   reschedule: async (blockId: string, newStartTime: string): Promise<ScheduleBlock> => {
     const response = await api.patch(`/api/schedule/${blockId}/reschedule`, { new_start_time: newStartTime });
     return response.data.block;
   },
+  
   completeBlockWithNotes: async (blockId: string, notes: string): Promise<{ success: boolean; block: ScheduleBlock; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/complete-with-notes`, { notes });
     return response.data;
   },
+  
   skipBlock: async (blockId: string): Promise<{ success: boolean; deadline_impact: string | null; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/skip`);
     return response.data;
   },
+  
   rescheduleBlock: async (blockId: string, option: 'later_today' | 'tomorrow' | 'custom', customTime?: string): Promise<{ success: boolean; block: ScheduleBlock; new_time: string; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/reschedule-smart`, { option, custom_time: customTime });
     return response.data;
   },
+  
   pushToNextWeek: async (blockId: string): Promise<{ success: boolean; new_date: string; deadline_impact: string | null; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/push-to-next-week`);
     return response.data;
   },
+  
   completeEarly: async (blockId: string, notes: string): Promise<{ success: boolean; block: ScheduleBlock; deadline_impact: string | null; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/complete-early`, { notes });
     return response.data;
@@ -416,22 +591,27 @@ export const availabilityAPI = {
     const response = await api.post('/api/availability/extract', { user_id: userId, text });
     return response.data;
   },
+  
   save: async (userId: string, availability: any): Promise<any> => {
     const response = await api.post('/api/availability', { user_id: userId, ...availability });
     return response.data;
   },
+  
   get: async (userId: string): Promise<{ availability: UserAvailability | null; has_availability: boolean }> => {
     const response = await api.get('/api/availability', { params: { user_id: userId } });
     return response.data;
   },
+  
   checkFeasibility: async (userId: string): Promise<any> => {
     const response = await api.get('/api/availability/feasibility', { params: { user_id: userId } });
     return response.data;
   },
+  
   update: async (userId: string, availability: any): Promise<any> => {
     const response = await api.post('/api/availability', { user_id: userId, ...availability });
     return response.data;
   },
 };
 
+// Alias for backwards compatibility
 export const goalsApi = goalsAPI;

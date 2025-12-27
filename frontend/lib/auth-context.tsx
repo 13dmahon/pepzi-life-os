@@ -23,6 +23,7 @@ interface AuthContextType {
   session: Session | null;
   profile: UserProfile | null;
   loading: boolean;
+  profileLoading: boolean;
   signUp: (email: string, password: string, name: string) => Promise<{ error: any }>;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
@@ -32,32 +33,37 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Added '/' to public routes so landing page is visible to logged-out users
-const PUBLIC_ROUTES = ['/', '/login', '/signup', '/auth/callback', '/forgot-password'];
+const PUBLIC_ROUTES = ['/login', '/signup', '/auth/callback', '/forgot-password', '/'];
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
   const fetchProfile = async (userId: string, retries = 3): Promise<UserProfile | null> => {
-    for (let i = 0; i < retries; i++) {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .single();
+    setProfileLoading(true);
+    try {
+      for (let i = 0; i < retries; i++) {
+        const { data, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', userId)
+          .single();
 
-      if (data) return data as UserProfile;
+        if (data) return data as UserProfile;
 
-      if (error && i < retries - 1) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        if (error && i < retries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
       }
+      return null;
+    } finally {
+      setProfileLoading(false);
     }
-    return null;
   };
 
   const refreshProfile = async () => {
@@ -104,9 +110,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfile(null);
         }
 
-        if (event === 'SIGNED_OUT') {
-          router.push('/login');
-        }
+        // Don't handle redirect here for SIGNED_OUT - handleSignOut does it
+        // This prevents race conditions and double redirects
       }
     );
 
@@ -114,20 +119,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Don't do anything while initial auth is loading
     if (loading) return;
+    
+    // Don't redirect while profile is still loading
+    if (profileLoading) return;
 
-    const isPublicRoute = PUBLIC_ROUTES.some(route => 
-      route === '/' ? pathname === '/' : pathname?.startsWith(route)
-    );
+    // Allow root path without checks
+    if (pathname === '/' || pathname === '') return;
+
+    const isPublicRoute = PUBLIC_ROUTES.some(route => pathname?.startsWith(route));
 
     if (!user && !isPublicRoute) {
+      // Not logged in and trying to hit a protected route → send to login
       router.push('/login');
-    } else if (user && profile && !profile.onboarding_complete && pathname !== '/onboarding') {
+    } else if (user && !profileLoading && profile !== null && profile.onboarding_complete === false && pathname !== '/onboarding') {
+      // Only redirect to onboarding if we're CERTAIN onboarding is not complete
+      // profile must be loaded (not null) and explicitly false
       router.push('/onboarding');
-    } else if (user && profile?.onboarding_complete && (pathname === '/login' || pathname === '/signup')) {
-      router.push('/');
+    } else if (user && (pathname === '/login' || pathname === '/signup')) {
+      // Logged-in user on login/signup page
+      if (profile === null) {
+        // Profile still loading, wait
+        return;
+      }
+      if (!profile.onboarding_complete) {
+        router.push('/onboarding');
+      } else {
+        router.push('/today');
+      }
     }
-  }, [user, profile, loading, pathname]);
+  }, [user, profile, loading, profileLoading, pathname, router]);
 
   const handleSignUp = async (email: string, password: string, name: string) => {
     const { data, error } = await supabase.auth.signUp({
@@ -152,11 +174,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    // Clear state immediately - don't wait for Supabase
     setUser(null);
     setSession(null);
     setProfile(null);
-    router.push('/login');
+    
+    // Fire signOut but don't block on it
+    // Use Promise.race with a timeout to prevent hanging
+    const signOutPromise = supabase.auth.signOut();
+    const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2000));
+    
+    try {
+      await Promise.race([signOutPromise, timeoutPromise]);
+    } catch (error) {
+      console.error('SignOut error (non-blocking):', error);
+    }
+    
+    // Always redirect regardless of signOut result
+    // Use window.location for a clean redirect that clears any cached state
+    window.location.href = '/login';
   };
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
@@ -174,6 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         profile,
         loading,
+        profileLoading,
         signUp: handleSignUp,
         signIn: handleSignIn,
         signOut: handleSignOut,

@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, Target, Calendar, TrendingUp, Clock, CheckCircle2, Circle, Settings, Flame, ChevronDown, ChevronRight, Play, SkipForward, ArrowRight, X } from 'lucide-react';
+import { ArrowLeft, Target, Calendar, TrendingUp, Clock, CheckCircle2, Circle, Settings, ChevronDown, ChevronRight, Play, SkipForward, ArrowRight, X, ExternalLink, Link2, Edit2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { goalsAPI, scheduleAPI } from '@/lib/api';
@@ -44,10 +44,16 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
   
   // Preferences modal state
   const [showPreferences, setShowPreferences] = useState(false);
-  const [preferredDays, setPreferredDays] = useState<string[]>(goal.preferred_days || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']);
-  const [weeklyHours, setWeeklyHours] = useState(goal.plan?.weekly_hours || 5);
-  const [sessionsPerWeek, setSessionsPerWeek] = useState(goal.plan?.sessions_per_week || 3);
+  const [preferredDays, setPreferredDays] = useState<string[]>([]);
+  const [weeklyHours, setWeeklyHours] = useState(5);
+  const [sessionsPerWeek, setSessionsPerWeek] = useState(3);
   const [savingPreferences, setSavingPreferences] = useState(false);
+
+  // Resource link modal state
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [resourceLink, setResourceLink] = useState(goal.resource_link || '');
+  const [resourceLinkLabel, setResourceLinkLabel] = useState(goal.resource_link_label || '');
+  const [savingLink, setSavingLink] = useState(false);
 
   // Notes modal state
   const [showNotesModal, setShowNotesModal] = useState(false);
@@ -57,23 +63,22 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
   // Confirmation popup state
   const [popup, setPopup] = useState<{ message: string; type: 'success' | 'warning' | 'info' } | null>(null);
 
-  // Intensify preview modal state
-  const [showIntensifyPreview, setShowIntensifyPreview] = useState(false);
-  const [intensifyPreview, setIntensifyPreview] = useState<Array<{
-    id: string;
-    before: { name: string; description: string; tip: string; duration_mins: number };
-    after: { name: string; description: string; tip: string; duration_mins: number };
-  }>>([]);
-  const [intensifyTotalSessions, setIntensifyTotalSessions] = useState(0);
-  const [loadingIntensify, setLoadingIntensify] = useState(false);
-  const [applyingIntensify, setApplyingIntensify] = useState(false);
-
   const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
   // Fetch schedule data
   useEffect(() => {
     fetchScheduleData();
   }, [goal.id]);
+
+  // Sync preferences state with goal prop
+  useEffect(() => {
+    const allDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    setPreferredDays(goal.preferred_days?.length ? goal.preferred_days : allDays);
+    setWeeklyHours(goal.plan?.weekly_hours || 5);
+    setSessionsPerWeek(goal.plan?.sessions_per_week || 3);
+    setResourceLink(goal.resource_link || '');
+    setResourceLinkLabel(goal.resource_link_label || '');
+  }, [goal]);
 
   const fetchScheduleData = async () => {
     try {
@@ -214,51 +219,22 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
     }
   };
 
-  // Handle intensify - show preview first
-  const handleIntensify = async () => {
-    setLoadingIntensify(true);
+  // Handle save resource link
+  const handleSaveLink = async () => {
+    setSavingLink(true);
     try {
-      const result = await goalsAPI.getIntensifyPreview(goal.id);
-      
-      if (!result.success || result.preview.length === 0) {
-        setPopup({
-          message: result.message || 'No future sessions to intensify',
-          type: 'info',
-        });
-        return;
-      }
-
-      setIntensifyPreview(result.preview);
-      setIntensifyTotalSessions(result.total_sessions);
-      setShowIntensifyPreview(true);
-    } catch (error) {
-      console.error('Intensify preview error:', error);
-      setPopup({ message: 'Failed to generate preview', type: 'warning' });
-    } finally {
-      setLoadingIntensify(false);
-    }
-  };
-
-  // Apply intensification
-  const applyIntensify = async () => {
-    setApplyingIntensify(true);
-    try {
-      const result = await goalsAPI.applyIntensify(goal.id, intensifyPreview);
-      
-      setShowIntensifyPreview(false);
+      await goalsAPI.updateResourceLink(goal.id, resourceLink, resourceLinkLabel);
+      setShowLinkModal(false);
       setPopup({
-        message: result.message || `🔥 ${result.sessions_updated} sessions intensified!`,
+        message: resourceLink ? 'Resource link saved!' : 'Resource link removed',
         type: 'success',
       });
-      
-      // Refresh data
-      await fetchScheduleData();
       queryClient.invalidateQueries({ queryKey: ['goals'] });
     } catch (error) {
-      console.error('Apply intensify error:', error);
-      setPopup({ message: 'Failed to apply changes', type: 'warning' });
+      console.error('Save link error:', error);
+      setPopup({ message: 'Failed to save link', type: 'warning' });
     } finally {
-      setApplyingIntensify(false);
+      setSavingLink(false);
     }
   };
 
@@ -328,28 +304,58 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
         </button>
 
         {/* Header */}
-        <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 mb-6">
-          <div className="flex items-start gap-4">
-            <div className={`w-16 h-16 bg-gradient-to-br ${getCategoryColor(goal.category)} rounded-2xl flex items-center justify-center flex-shrink-0`}>
-              <Target className="w-8 h-8 text-white" />
+        <div className="bg-white rounded-2xl p-4 sm:p-6 shadow-lg border border-gray-100 mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+            <div className={`w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br ${getCategoryColor(goal.category)} rounded-2xl flex items-center justify-center flex-shrink-0`}>
+              <Target className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">{goal.name}</h1>
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2">{goal.name}</h1>
+              <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                <span className="px-2 sm:px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs sm:text-sm font-medium">
                   {goal.category}
                 </span>
                 {goal.target_date && (
-                  <span className="flex items-center gap-1 text-gray-600 text-sm">
-                    <Calendar className="w-4 h-4" />
-                    Target: {new Date(goal.target_date).toLocaleDateString()}
+                  <span className="flex items-center gap-1 text-gray-600 text-xs sm:text-sm">
+                    <Calendar className="w-3 h-3 sm:w-4 sm:h-4" />
+                    <span className="hidden sm:inline">Target:</span> {new Date(goal.target_date).toLocaleDateString()}
                   </span>
                 )}
               </div>
+              
+              {/* Resource Link */}
+              {goal.resource_link ? (
+                <div className="mt-3 flex items-center gap-2 flex-wrap">
+                  <a
+                    href={goal.resource_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    {goal.resource_link_label || 'Open Resource'}
+                  </a>
+                  <button
+                    onClick={() => setShowLinkModal(true)}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Edit link"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowLinkModal(true)}
+                  className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 border border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-500 hover:text-blue-600 rounded-lg text-sm font-medium transition-colors"
+                >
+                  <Link2 className="w-4 h-4" />
+                  Add Resource Link
+                </button>
+              )}
             </div>
             
-            {/* Action buttons */}
-            <div className="flex gap-2">
+            {/* Settings button only */}
+            <div className="flex gap-2 self-start">
               <button
                 onClick={() => setShowPreferences(true)}
                 className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
@@ -357,24 +363,12 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
               >
                 <Settings className="w-5 h-5 text-gray-600" />
               </button>
-              <button
-                onClick={handleIntensify}
-                disabled={loadingIntensify}
-                className="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center gap-2 disabled:opacity-50"
-              >
-                {loadingIntensify ? (
-                  <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                ) : (
-                  <Flame className="w-4 h-4" />
-                )}
-                <span className="hidden md:inline">Intensify</span>
-              </button>
             </div>
           </div>
         </div>
 
         {/* Progress Overview */}
-        <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 mb-6">
+        <div className="bg-white rounded-2xl p-4 sm:p-6 shadow-lg border border-gray-100 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">📊 Progress</h2>
           
           <div className="mb-4">
@@ -395,28 +389,28 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
             )}
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="text-center p-3 bg-gray-50 rounded-xl">
-              <div className="text-2xl font-bold text-gray-900">{aggregates?.total_sessions || 0}</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
+            <div className="text-center p-2 sm:p-3 bg-gray-50 rounded-xl">
+              <div className="text-xl sm:text-2xl font-bold text-gray-900">{aggregates?.total_sessions || 0}</div>
               <div className="text-xs text-gray-600">Sessions Done</div>
             </div>
-            <div className="text-center p-3 bg-gray-50 rounded-xl">
-              <div className="text-2xl font-bold text-gray-900">{actualHours}h</div>
+            <div className="text-center p-2 sm:p-3 bg-gray-50 rounded-xl">
+              <div className="text-xl sm:text-2xl font-bold text-gray-900">{actualHours}h</div>
               <div className="text-xs text-gray-600">Hours Logged</div>
             </div>
-            <div className="text-center p-3 bg-gray-50 rounded-xl">
-              <div className="text-2xl font-bold text-gray-900">{goal.plan?.weekly_hours || 0}h</div>
+            <div className="text-center p-2 sm:p-3 bg-gray-50 rounded-xl">
+              <div className="text-xl sm:text-2xl font-bold text-gray-900">{goal.plan?.weekly_hours || 0}h</div>
               <div className="text-xs text-gray-600">Per Week</div>
             </div>
-            <div className="text-center p-3 bg-gray-50 rounded-xl">
-              <div className="text-2xl font-bold text-gray-900">{goal.plan?.total_weeks || 0}</div>
+            <div className="text-center p-2 sm:p-3 bg-gray-50 rounded-xl">
+              <div className="text-xl sm:text-2xl font-bold text-gray-900">{goal.plan?.total_weeks || 0}</div>
               <div className="text-xs text-gray-600">Total Weeks</div>
             </div>
           </div>
         </div>
 
         {/* Timeline - Sessions by Week */}
-        <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 mb-6">
+        <div className="bg-white rounded-2xl p-4 sm:p-6 shadow-lg border border-gray-100 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">📅 Training Timeline</h2>
           
           {loading ? (
@@ -450,29 +444,29 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
                     {/* Week Header */}
                     <button
                       onClick={() => toggleWeek(weekNum)}
-                      className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors flex items-center justify-between"
+                      className="w-full px-3 sm:px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors flex items-center justify-between"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
                         {isExpanded ? (
-                          <ChevronDown className="w-5 h-5 text-gray-400" />
+                          <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0" />
                         ) : (
-                          <ChevronRight className="w-5 h-5 text-gray-400" />
+                          <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0" />
                         )}
                         <span className="font-bold text-gray-900">Week {weekNum}</span>
                         {weekPlan?.focus && (
-                          <span className="text-sm text-gray-600 hidden md:inline">• {weekPlan.focus}</span>
+                          <span className="text-sm text-gray-600 hidden md:inline truncate">• {weekPlan.focus}</span>
                         )}
                         {milestone && (
-                          <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
-                            🎯 {milestone.name}
+                          <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full flex-shrink-0">
+                            🎯 <span className="hidden sm:inline">{milestone.name}</span>
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm text-gray-500">
-                          {completedInWeek}/{totalInWeek} done
+                      <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                        <span className="text-xs sm:text-sm text-gray-500">
+                          {completedInWeek}/{totalInWeek}
                         </span>
-                        <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div className="w-12 sm:w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
                           <div
                             className="h-full bg-green-500 transition-all"
                             style={{ width: `${totalInWeek > 0 ? (completedInWeek / totalInWeek) * 100 : 0}%` }}
@@ -483,7 +477,7 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
 
                     {/* Week Sessions */}
                     {isExpanded && (
-                      <div className="p-4 space-y-3 bg-white">
+                      <div className="p-3 sm:p-4 space-y-3 bg-white">
                         {/* Milestone banner if exists */}
                         {milestone && (
                           <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
@@ -504,7 +498,7 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
                           sessions.map((session) => (
                             <div
                               key={session.id}
-                              className={`border rounded-xl p-4 transition-all ${
+                              className={`border rounded-xl p-3 sm:p-4 transition-all ${
                                 session.status === 'completed'
                                   ? 'border-green-200 bg-green-50/50'
                                   : session.status === 'skipped'
@@ -514,7 +508,7 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
                                   : 'border-gray-200 hover:border-purple-300'
                               }`}
                             >
-                              <div className="flex items-start justify-between gap-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 mb-1">
                                     {session.status === 'completed' ? (
@@ -524,7 +518,7 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
                                     ) : (
                                       <Circle className="w-5 h-5 text-gray-300 flex-shrink-0" />
                                     )}
-                                    <h4 className={`font-semibold ${
+                                    <h4 className={`font-semibold text-sm sm:text-base ${
                                       session.status === 'completed' ? 'text-green-700 line-through' :
                                       session.status === 'skipped' ? 'text-gray-500 line-through' :
                                       'text-gray-900'
@@ -533,12 +527,12 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
                                     </h4>
                                   </div>
                                   
-                                  <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+                                  <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-500 mb-2 flex-wrap">
                                     <span>{formatDate(session.scheduled_start)}</span>
                                     <span>•</span>
                                     <span>{formatTime(session.scheduled_start)}</span>
                                     <span>•</span>
-                                    <span>{session.duration_mins} min</span>
+                                    <span>{session.duration_mins}m</span>
                                     {session.is_today && session.status === 'scheduled' && (
                                       <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
                                         Today
@@ -559,11 +553,11 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
 
                                 {/* Action buttons for scheduled sessions */}
                                 {session.status === 'scheduled' && (
-                                  <div className="flex flex-col gap-2">
+                                  <div className="flex sm:flex-col gap-2">
                                     <button
                                       onClick={() => handleComplete(session)}
                                       disabled={actionLoading === session.id}
-                                      className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium flex items-center gap-1 disabled:opacity-50"
+                                      className="flex-1 sm:flex-none px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-50"
                                     >
                                       <CheckCircle2 className="w-4 h-4" />
                                       Done
@@ -573,18 +567,18 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
                                         <button
                                           onClick={() => handlePushToNextWeek(session)}
                                           disabled={actionLoading === session.id}
-                                          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium flex items-center gap-1 disabled:opacity-50"
+                                          className="flex-1 sm:flex-none px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-50"
                                         >
                                           <ArrowRight className="w-4 h-4" />
-                                          Push
+                                          <span className="hidden sm:inline">Push</span>
                                         </button>
                                         <button
                                           onClick={() => handleSkip(session)}
                                           disabled={actionLoading === session.id}
-                                          className="px-3 py-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium flex items-center gap-1 disabled:opacity-50"
+                                          className="flex-1 sm:flex-none px-3 py-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-50"
                                         >
                                           <SkipForward className="w-4 h-4" />
-                                          Skip
+                                          <span className="hidden sm:inline">Skip</span>
                                         </button>
                                       </>
                                     )}
@@ -603,6 +597,87 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
           )}
         </div>
       </div>
+
+      {/* Resource Link Modal */}
+      {showLinkModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
+            <div className="p-4 border-b flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">Resource Link</h3>
+              <button
+                onClick={() => setShowLinkModal(false)}
+                className="p-1 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Link URL
+                </label>
+                <input
+                  type="url"
+                  value={resourceLink}
+                  onChange={(e) => setResourceLink(e.target.value)}
+                  placeholder="https://youtube.com/watch?v=..."
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Add a link to a video, course, or any resource for this goal
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Button Label (optional)
+                </label>
+                <input
+                  type="text"
+                  value={resourceLinkLabel}
+                  onChange={(e) => setResourceLinkLabel(e.target.value)}
+                  placeholder="e.g., Watch Workout Video"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t flex gap-3">
+              {goal.resource_link && (
+                <button
+                  onClick={() => {
+                    setResourceLink('');
+                    setResourceLinkLabel('');
+                  }}
+                  className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg font-medium"
+                >
+                  Remove
+                </button>
+              )}
+              <div className="flex-1" />
+              <button
+                onClick={() => setShowLinkModal(false)}
+                className="px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveLink}
+                disabled={savingLink}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-50 flex items-center gap-2"
+              >
+                {savingLink ? (
+                  <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                ) : (
+                  <Link2 className="w-4 h-4" />
+                )}
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notes Modal */}
       {showNotesModal && activeSession && (
@@ -752,111 +827,6 @@ export default function GoalDetailView({ goal, onBack }: GoalDetailViewProps) {
                 className="flex-1 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-medium disabled:opacity-50"
               >
                 {savingPreferences ? 'Saving...' : 'Save & Regenerate'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Intensify Preview Modal */}
-      {showIntensifyPreview && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="p-4 border-b flex items-center justify-between bg-gradient-to-r from-orange-500 to-red-500">
-              <div>
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Flame className="w-5 h-5" />
-                  Intensify Preview
-                </h3>
-                <p className="text-orange-100 text-sm">
-                  {intensifyTotalSessions} sessions will be upgraded
-                </p>
-              </div>
-              <button
-                onClick={() => setShowIntensifyPreview(false)}
-                className="p-1 hover:bg-white/20 rounded-lg"
-              >
-                <X className="w-5 h-5 text-white" />
-              </button>
-            </div>
-            
-            <div className="p-4 overflow-y-auto flex-1">
-              <div className="space-y-4">
-                {intensifyPreview.map((item, index) => (
-                  <div key={item.id} className="border border-gray-200 rounded-xl overflow-hidden">
-                    <div className="bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
-                      Session {index + 1}
-                    </div>
-                    
-                    <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-200">
-                      {/* Before */}
-                      <div className="p-3">
-                        <div className="text-xs text-gray-400 uppercase tracking-wide mb-2">Before</div>
-                        <h4 className="font-semibold text-gray-700 mb-1">{item.before.name}</h4>
-                        <p className="text-sm text-gray-500 mb-2">{item.before.description || 'No description'}</p>
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="px-2 py-0.5 bg-gray-100 rounded text-gray-600">
-                            {item.before.duration_mins} min
-                          </span>
-                        </div>
-                      </div>
-                      
-                      {/* After */}
-                      <div className="p-3 bg-orange-50/50">
-                        <div className="text-xs text-orange-500 uppercase tracking-wide mb-2 flex items-center gap-1">
-                          <Flame className="w-3 h-3" />
-                          After
-                        </div>
-                        <h4 className="font-semibold text-gray-900 mb-1">{item.after.name}</h4>
-                        <p className="text-sm text-gray-700 mb-2">{item.after.description}</p>
-                        {item.after.tip && (
-                          <p className="text-xs text-orange-600 bg-orange-100 px-2 py-1 rounded mb-2">
-                            💡 {item.after.tip}
-                          </p>
-                        )}
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="px-2 py-0.5 bg-orange-200 rounded text-orange-700 font-medium">
-                            {item.after.duration_mins} min
-                            {item.after.duration_mins > item.before.duration_mins && (
-                              <span className="ml-1 text-orange-500">
-                                (+{item.after.duration_mins - item.before.duration_mins})
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              
-              {intensifyTotalSessions > intensifyPreview.length && (
-                <p className="text-center text-sm text-gray-500 mt-4 py-2 bg-gray-50 rounded-lg">
-                  + {intensifyTotalSessions - intensifyPreview.length} more sessions will also be intensified
-                </p>
-              )}
-            </div>
-
-            <div className="p-4 border-t bg-gray-50 flex gap-3">
-              <button
-                onClick={() => setShowIntensifyPreview(false)}
-                className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-white font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={applyIntensify}
-                disabled={applyingIntensify}
-                className="flex-1 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg hover:shadow-lg font-medium flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {applyingIntensify ? (
-                  <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                ) : (
-                  <>
-                    <Flame className="w-4 h-4" />
-                    Apply Changes
-                  </>
-                )}
               </button>
             </div>
           </div>

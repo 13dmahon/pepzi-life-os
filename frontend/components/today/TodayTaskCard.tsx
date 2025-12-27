@@ -1,6 +1,6 @@
 'use client';
 
-import { Clock, CheckCircle, Play } from 'lucide-react';
+import { Clock, CheckCircle, Circle, ExternalLink } from 'lucide-react';
 
 interface TodayTask {
   id: string;
@@ -16,6 +16,8 @@ interface TodayTask {
   completed_at?: string;
   notes?: string;
   previous_notes?: string;
+  resource_link?: string;
+  resource_link_label?: string;
   tracking_requirements?: Array<{
     key: string;
     label: string;
@@ -31,30 +33,22 @@ interface TodayTaskCardProps {
   isOverdue?: boolean;
 }
 
-const categoryColors: Record<string, string> = {
-  fitness: 'from-green-500 to-emerald-500',
-  climbing: 'from-orange-500 to-amber-500',
-  languages: 'from-blue-500 to-indigo-500',
-  business: 'from-purple-500 to-violet-500',
-  creative: 'from-pink-500 to-rose-500',
-  mental_health: 'from-cyan-500 to-teal-500',
-  default: 'from-gray-500 to-slate-500',
-};
-
-const categoryIcons: Record<string, string> = {
+const categoryEmoji: Record<string, string> = {
   fitness: '🏃',
   climbing: '🧗',
   languages: '🌍',
   business: '💼',
   creative: '🎨',
   mental_health: '🧘',
+  skill: '🎯',
+  health: '❤️',
+  education: '📚',
   default: '📋',
 };
 
 export default function TodayTaskCard({ task, onComplete, onSkip, isOverdue }: TodayTaskCardProps) {
   const isCompleted = task.status === 'completed';
-  const colorClass = categoryColors[task.category || 'default'] || categoryColors.default;
-  const icon = categoryIcons[task.category || 'default'] || categoryIcons.default;
+  const emoji = categoryEmoji[task.category || 'default'] || categoryEmoji.default;
 
   const scheduledTime = new Date(task.scheduled_time).toLocaleTimeString('en-GB', {
     hour: '2-digit',
@@ -69,98 +63,122 @@ export default function TodayTaskCard({ task, onComplete, onSkip, isOverdue }: T
   };
 
   return (
-    <div
-      className={`
-        bg-white rounded-xl border-2 overflow-hidden transition-all
-        ${isCompleted ? 'border-green-200 bg-green-50/50 opacity-75' : 'border-gray-200'}
-        ${isOverdue && !isCompleted ? 'border-orange-300 bg-orange-50/30' : ''}
-      `}
-    >
+    <div className={`
+      backdrop-blur-xl bg-white/80 rounded-2xl border border-white/60 
+      shadow-sm hover:shadow-md transition-all
+      ${isCompleted ? 'opacity-60' : ''}
+    `}>
       <div className="p-4">
+        {/* Header row - like a tweet header */}
         <div className="flex items-start gap-3">
-          {/* Status Icon */}
+          {/* Avatar-style icon */}
           <div className={`
-            w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0
+            w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0
             ${isCompleted 
-              ? 'bg-green-100' 
-              : `bg-gradient-to-br ${colorClass}`
+              ? 'bg-emerald-100' 
+              : 'bg-slate-100'
             }
           `}>
             {isCompleted ? (
-              <CheckCircle className="w-6 h-6 text-green-600" />
+              <CheckCircle className="w-5 h-5 text-emerald-500" />
             ) : (
-              <span className="text-2xl">{icon}</span>
+              <span className="text-lg">{emoji}</span>
             )}
           </div>
 
-          {/* Content */}
+          {/* Main content */}
           <div className="flex-1 min-w-0">
+            {/* Title row */}
             <div className="flex items-start justify-between gap-2">
-              <div>
-                <h3 className={`font-bold text-lg ${isCompleted ? 'text-green-700 line-through' : 'text-gray-900'}`}>
+              <div className="flex-1">
+                <h3 className={`font-semibold text-base leading-tight ${
+                  isCompleted ? 'text-slate-400 line-through' : 'text-slate-800'
+                }`}>
                   {task.name}
                 </h3>
-                <p className="text-sm text-purple-600 font-medium">{task.goal_name}</p>
-              </div>
-              
-              {/* Time badge */}
-              <div className={`
-                flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-medium flex-shrink-0
-                ${isOverdue && !isCompleted 
-                  ? 'bg-orange-100 text-orange-700' 
-                  : 'bg-gray-100 text-gray-600'
-                }
-              `}>
-                <Clock className="w-3.5 h-3.5" />
-                {scheduledTime}
+                
+                {/* Time and duration - subtle, inline */}
+                <div className="flex items-center gap-2 mt-1 text-sm text-slate-400 flex-wrap">
+                  <Clock className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>{scheduledTime}</span>
+                  <span>·</span>
+                  <span>{formatDuration(task.duration_mins)}</span>
+                  {isOverdue && !isCompleted && (
+                    <>
+                      <span>·</span>
+                      <span className="text-amber-500 font-medium">Overdue</span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Duration */}
-            <div className="flex items-center gap-2 mt-2 text-sm text-gray-500">
-              <span>{formatDuration(task.duration_mins)}</span>
-            </div>
-
-            {/* Description */}
+            {/* Description - like tweet body */}
             {task.description && (
-              <p className={`mt-2 text-sm ${isCompleted ? 'text-green-600' : 'text-gray-600'} leading-relaxed`}>
+              <p className={`mt-2 text-sm leading-relaxed ${
+                isCompleted ? 'text-slate-400' : 'text-slate-600'
+              }`}>
                 {task.description}
               </p>
             )}
 
-            {/* Tip */}
+            {/* Goal pill - subtle neutral */}
+            <div className="mt-3">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-500 text-xs font-medium rounded-full">
+                <Circle className="w-2 h-2 fill-current" />
+                {task.goal_name}
+              </span>
+            </div>
+
+            {/* Resource Link - prominent button */}
+            {task.resource_link && !isCompleted && (
+              <div className="mt-3">
+                <a
+                  href={task.resource_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-sm font-medium transition-colors shadow-sm"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  {task.resource_link_label || 'Open Resource'}
+                </a>
+              </div>
+            )}
+
+            {/* Tip - subtle */}
             {task.tip && !isCompleted && (
-              <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-xs text-yellow-800">
-                  💡 {task.tip}
+              <div className="mt-3 p-3 bg-white/50 backdrop-blur-sm border border-slate-100 rounded-xl">
+                <p className="text-sm text-slate-500">
+                  <span className="text-amber-500">💡</span> {task.tip}
                 </p>
               </div>
             )}
 
-            {/* Previous notes (if any) */}
+            {/* Previous notes */}
             {task.previous_notes && !isCompleted && (
-              <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-xs text-blue-600 font-medium mb-1">📝 Last time:</p>
-                <p className="text-xs text-blue-800">{task.previous_notes}</p>
+              <div className="mt-3 p-3 bg-white/50 backdrop-blur-sm border border-slate-100 rounded-xl">
+                <p className="text-xs text-slate-400 font-medium mb-1">Last time:</p>
+                <p className="text-sm text-slate-600">{task.previous_notes}</p>
               </div>
             )}
 
             {/* Completed notes */}
             {isCompleted && task.notes && (
-              <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded-lg">
-                <p className="text-xs text-green-600 font-medium mb-1">✓ Notes:</p>
-                <p className="text-xs text-green-800">{task.notes}</p>
+              <div className="mt-3 p-3 bg-emerald-50/50 backdrop-blur-sm border border-emerald-100 rounded-xl">
+                <p className="text-xs text-emerald-500 font-medium mb-1">✓ Completed</p>
+                <p className="text-sm text-emerald-700">{task.notes}</p>
               </div>
             )}
           </div>
         </div>
 
-        {/* Action buttons - only show if not completed */}
+        {/* Action button - clean, full width */}
         {!isCompleted && (
-          <div className="flex gap-2 mt-4">
+          <div className="mt-4 pt-3 border-t border-slate-100">
             <button
               onClick={() => onComplete?.(task)}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-medium hover:shadow-lg transition-all"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-medium transition-colors"
             >
               <CheckCircle className="w-4 h-4" />
               Complete

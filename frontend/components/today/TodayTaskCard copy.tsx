@@ -5,17 +5,23 @@ import { Clock, CheckCircle, Play } from 'lucide-react';
 interface TodayTask {
   id: string;
   name: string;
-  description: string;
-  tip: string;
+  description?: string;
+  tip?: string;
   goal_name: string;
-  goal_id: string;
-  category: string;
+  goal_id?: string;
+  category?: string;
   scheduled_time: string;
   duration_mins: number;
   status: string;
   completed_at?: string;
   notes?: string;
   previous_notes?: string;
+  tracking_requirements?: Array<{
+    key: string;
+    label: string;
+    type: string;
+    unit?: string;
+  }>;
 }
 
 interface TodayTaskCardProps {
@@ -47,8 +53,8 @@ const categoryIcons: Record<string, string> = {
 
 export default function TodayTaskCard({ task, onComplete, onSkip, isOverdue }: TodayTaskCardProps) {
   const isCompleted = task.status === 'completed';
-  const colorClass = categoryColors[task.category] || categoryColors.default;
-  const icon = categoryIcons[task.category] || categoryIcons.default;
+  const colorClass = categoryColors[task.category || 'default'] || categoryColors.default;
+  const icon = categoryIcons[task.category || 'default'] || categoryIcons.default;
 
   const scheduledTime = new Date(task.scheduled_time).toLocaleTimeString('en-GB', {
     hour: '2-digit',

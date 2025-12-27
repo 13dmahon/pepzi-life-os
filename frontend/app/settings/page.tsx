@@ -14,11 +14,22 @@ import {
   Save,
   Check,
   LogOut,
+  User,
+  Settings,
 } from 'lucide-react';
 import Link from 'next/link';
 
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+// Glass Card component matching website style
+function GlassCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`backdrop-blur-2xl bg-white/70 border border-white/80 shadow-[0_8px_32px_rgba(0,0,0,0.06)] rounded-3xl ${className}`}>
+      {children}
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const { user, profile, updateProfile, signOut, loading: authLoading } = useAuth();
@@ -74,13 +85,24 @@ export default function SettingsPage() {
   // Show loading while auth is initializing
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+      <div className="min-h-screen relative">
+        {/* Background */}
+        <div className="fixed inset-0 z-0">
+          <div 
+            className="absolute inset-0 bg-cover bg-bottom bg-no-repeat"
+            style={{
+              backgroundImage: `url('https://images.unsplash.com/photo-1454496522488-7a8e488e8606?auto=format&fit=crop&w=2076&q=80')`,
+            }}
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-white/80 via-white/70 to-white/90" />
+        </div>
+        <div className="relative z-10 flex items-center justify-center min-h-screen">
+          <Loader2 className="w-8 h-8 animate-spin text-slate-500" />
+        </div>
       </div>
     );
   }
 
-  // Redirect handled by auth-context, but show nothing if no user
   if (!user) {
     return null;
   }
@@ -105,7 +127,15 @@ export default function SettingsPage() {
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
-    await signOut();
+    try {
+      await signOut();
+      // Force redirect if signOut doesn't do it
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Force redirect anyway
+      window.location.href = '/login';
+    }
   };
 
   const toggleWorkDay = (day: string) => {
@@ -149,169 +179,342 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-24 md:pb-8 md:pt-20">
-      {/* Header with Profile */}
-      <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white">
-        <div className="max-w-2xl mx-auto px-4 pt-4 pb-6">
-          <div className="flex items-center gap-4 mb-6">
-            <Link href="/" className="p-2 hover:bg-white/20 rounded-lg">
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
-            <h1 className="text-xl font-bold">Settings</h1>
-          </div>
-          
-          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-4">
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center text-2xl font-bold">
-                {getInitials()}
-              </div>
-              <div className="flex-1 min-w-0">
-                {editingName ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      className="flex-1 px-3 py-1.5 rounded-lg bg-white/20 text-white placeholder-white/60 border border-white/30 focus:outline-none"
-                      placeholder="Your name"
-                      autoFocus
-                    />
-                    <button onClick={handleSaveName} disabled={savingName} className="px-3 py-1.5 bg-white text-purple-600 rounded-lg text-sm font-medium">
-                      {savingName ? '...' : 'Save'}
-                    </button>
-                    <button onClick={() => setEditingName(false)} className="px-2 py-1.5 text-white/80 text-sm">✕</button>
-                  </div>
-                ) : (
-                  <button onClick={() => setEditingName(true)} className="text-left">
-                    <h2 className="text-xl font-semibold truncate hover:underline">{profile?.name || 'Tap to add name'}</h2>
-                  </button>
-                )}
-                <p className="text-white/80 text-sm truncate mt-1">{user?.email}</p>
-              </div>
-            </div>
-          </div>
-        </div>
+    <div className="min-h-screen relative pb-24 md:pb-8 md:pt-16">
+      {/* Mountain Background */}
+      <div className="fixed inset-0 z-0">
+        <div 
+          className="absolute inset-0 bg-cover bg-bottom bg-no-repeat"
+          style={{
+            backgroundImage: `url('https://images.unsplash.com/photo-1454496522488-7a8e488e8606?auto=format&fit=crop&w=2076&q=80')`,
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-white/80 via-white/70 to-white/90" />
       </div>
 
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+      <div className="relative z-10 max-w-2xl mx-auto px-4">
+        {/* Header */}
+        <div className="pt-4 pb-6">
+          <GlassCard className="p-4">
+            <div className="flex items-center gap-4">
+              <Link href="/" className="p-2.5 hover:bg-slate-100/50 rounded-xl transition-colors">
+                <ArrowLeft className="w-5 h-5 text-slate-600" />
+              </Link>
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-slate-100 rounded-xl">
+                  <Settings className="w-5 h-5 text-slate-600" />
+                </div>
+                <div>
+                  <h1 className="text-lg font-semibold text-slate-700">Settings</h1>
+                  <p className="text-xs text-slate-400">Customize your experience</p>
+                </div>
+              </div>
+            </div>
+          </GlassCard>
+        </div>
+
+        {/* Profile Card */}
+        <GlassCard className="p-5 mb-4">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-slate-400 to-slate-600 flex items-center justify-center text-xl font-bold text-white shadow-lg">
+              {getInitials()}
+            </div>
+            <div className="flex-1 min-w-0">
+              {editingName ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-xl bg-white/60 border border-slate-200 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                    placeholder="Your name"
+                    autoFocus
+                  />
+                  <button 
+                    onClick={handleSaveName} 
+                    disabled={savingName} 
+                    className="px-3 py-2 bg-slate-700 text-white rounded-xl text-sm font-medium hover:bg-slate-600 transition-colors"
+                  >
+                    {savingName ? '...' : 'Save'}
+                  </button>
+                  <button 
+                    onClick={() => setEditingName(false)} 
+                    className="p-2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => setEditingName(true)} className="text-left group">
+                  <h2 className="text-lg font-semibold text-slate-700 truncate group-hover:text-slate-900 transition-colors">
+                    {profile?.name || 'Tap to add name'}
+                  </h2>
+                </button>
+              )}
+              <p className="text-sm text-slate-400 truncate mt-0.5">{user?.email}</p>
+            </div>
+          </div>
+        </GlassCard>
+
         {/* Save Button */}
         <button
           onClick={handleSave}
           disabled={loading}
-          className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium ${
-            saved ? 'bg-green-500 text-white' : 'bg-purple-500 text-white hover:bg-purple-600'
+          className={`w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl font-medium transition-all mb-4 ${
+            saved 
+              ? 'bg-emerald-500 text-white shadow-lg' 
+              : 'bg-slate-700 text-white hover:bg-slate-600 shadow-lg hover:shadow-xl'
           } disabled:opacity-50`}
         >
-          {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Saving...</> : saved ? <><Check className="w-4 h-4" />Saved!</> : <><Save className="w-4 h-4" />Save Changes</>}
-        </button>
-
-        {/* Daily Rhythm */}
-        <div className="bg-white rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 bg-amber-100 rounded-lg"><Sun className="w-5 h-5 text-amber-600" /></div>
-            <h2 className="text-lg font-semibold text-gray-900">Daily Rhythm</h2>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Wake up</label>
-              <input type="time" value={wakeTime} onChange={(e) => setWakeTime(e.target.value)} className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Bedtime</label>
-              <input type="time" value={sleepTime} onChange={(e) => setSleepTime(e.target.value)} className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500" />
-            </div>
-          </div>
-        </div>
-
-        {/* Work Schedule */}
-        <div className="bg-white rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 bg-blue-100 rounded-lg"><Briefcase className="w-5 h-5 text-blue-600" /></div>
-            <h2 className="text-lg font-semibold text-gray-900">Work Schedule</h2>
-          </div>
-          <div className="flex gap-3 mb-4">
-            <button onClick={() => setWorks(true)} className={`flex-1 py-2.5 rounded-xl font-medium ${works ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}>I work</button>
-            <button onClick={() => setWorks(false)} className={`flex-1 py-2.5 rounded-xl font-medium ${!works ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}>I don't work</button>
-          </div>
-          {works && (
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Work days</label>
-                <div className="flex gap-2">
-                  {DAYS.map((day, i) => (
-                    <button key={day} onClick={() => toggleWorkDay(day)} className={`flex-1 py-2 rounded-lg text-sm font-medium ${workDays.includes(day) ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'}`}>{DAY_LABELS[i]}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Start</label>
-                  <input type="time" value={workStart} onChange={(e) => setWorkStart(e.target.value)} className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">End</label>
-                  <input type="time" value={workEnd} onChange={(e) => setWorkEnd(e.target.value)} className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500" />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Commute */}
-        <div className="bg-white rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 bg-orange-100 rounded-lg"><Car className="w-5 h-5 text-orange-600" /></div>
-            <h2 className="text-lg font-semibold text-gray-900">Commute</h2>
-          </div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">One-way: <span className="text-orange-600">{commuteMins} min</span></label>
-          <input type="range" min="0" max="120" step="5" value={commuteMins} onChange={(e) => setCommuteMins(parseInt(e.target.value))} className="w-full accent-orange-500" />
-        </div>
-
-        {/* Fixed Commitments */}
-        <div className="bg-white rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 bg-purple-100 rounded-lg"><Calendar className="w-5 h-5 text-purple-600" /></div>
-            <h2 className="text-lg font-semibold text-gray-900">Fixed Commitments</h2>
-          </div>
-          {commitments.map((c, i) => (
-            <div key={i} className="flex items-center gap-3 bg-gray-50 rounded-xl p-3 mb-2">
-              <div className="flex-1">
-                <div className="font-medium text-gray-900">{c.name}</div>
-                <div className="text-sm text-gray-500 capitalize">{c.day} · {c.start} - {c.end}</div>
-              </div>
-              <button onClick={() => removeCommitment(i)} className="p-2 text-gray-400 hover:text-red-500"><X className="w-4 h-4" /></button>
-            </div>
-          ))}
-          {showAddCommitment ? (
-            <div className="bg-purple-50 rounded-xl p-4 space-y-3">
-              <input type="text" value={newCommitment.name} onChange={(e) => setNewCommitment(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Football" className="w-full px-4 py-2.5 border border-purple-200 rounded-xl" autoFocus />
-              <div className="grid grid-cols-3 gap-2">
-                <select value={newCommitment.day} onChange={(e) => setNewCommitment(p => ({ ...p, day: e.target.value }))} className="px-3 py-2.5 border border-purple-200 rounded-xl">
-                  {DAYS.map(day => <option key={day} value={day}>{day}</option>)}
-                </select>
-                <input type="time" value={newCommitment.start} onChange={(e) => setNewCommitment(p => ({ ...p, start: e.target.value }))} className="px-3 py-2.5 border border-purple-200 rounded-xl" />
-                <input type="time" value={newCommitment.end} onChange={(e) => setNewCommitment(p => ({ ...p, end: e.target.value }))} className="px-3 py-2.5 border border-purple-200 rounded-xl" />
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => setShowAddCommitment(false)} className="flex-1 py-2 text-gray-600 hover:bg-gray-100 rounded-xl">Cancel</button>
-                <button onClick={addCommitment} disabled={!newCommitment.name.trim()} className="flex-1 py-2 bg-purple-500 text-white rounded-xl disabled:opacity-50">Add</button>
-              </div>
-            </div>
+          {loading ? (
+            <><Loader2 className="w-4 h-4 animate-spin" />Saving...</>
+          ) : saved ? (
+            <><Check className="w-4 h-4" />Saved!</>
           ) : (
-            <button onClick={() => setShowAddCommitment(true)} className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-purple-400 hover:text-purple-600 flex items-center justify-center gap-2">
-              <Plus className="w-5 h-5" />Add commitment
-            </button>
+            <><Save className="w-4 h-4" />Save Changes</>
           )}
-        </div>
-
-        {/* Logout */}
-        <button onClick={handleLogout} disabled={isLoggingOut} className="w-full flex items-center gap-4 px-6 py-4 bg-white rounded-2xl shadow-sm hover:bg-red-50 disabled:opacity-50">
-          <div className="p-2 bg-red-100 rounded-lg"><LogOut className="w-5 h-5 text-red-600" /></div>
-          <span className="font-medium text-red-600">{isLoggingOut ? 'Logging out...' : 'Log Out'}</span>
         </button>
 
-        <div className="text-center text-sm text-gray-400 py-4">
-          <p>Pepzi v1.0.0</p>
+        <div className="space-y-4">
+          {/* Daily Rhythm */}
+          <GlassCard className="p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 bg-amber-100/80 rounded-xl">
+                <Sun className="w-5 h-5 text-amber-600" />
+              </div>
+              <h2 className="text-lg font-semibold text-slate-700">Daily Rhythm</h2>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-500 mb-2">Wake up</label>
+                <input 
+                  type="time" 
+                  value={wakeTime} 
+                  onChange={(e) => setWakeTime(e.target.value)} 
+                  className="w-full px-4 py-3 bg-white/60 border border-slate-200/80 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-400 text-slate-700" 
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-500 mb-2">Bedtime</label>
+                <input 
+                  type="time" 
+                  value={sleepTime} 
+                  onChange={(e) => setSleepTime(e.target.value)} 
+                  className="w-full px-4 py-3 bg-white/60 border border-slate-200/80 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-400 text-slate-700" 
+                />
+              </div>
+            </div>
+          </GlassCard>
+
+          {/* Work Schedule */}
+          <GlassCard className="p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 bg-blue-100/80 rounded-xl">
+                <Briefcase className="w-5 h-5 text-blue-600" />
+              </div>
+              <h2 className="text-lg font-semibold text-slate-700">Work Schedule</h2>
+            </div>
+            <div className="flex gap-3 mb-4">
+              <button 
+                onClick={() => setWorks(true)} 
+                className={`flex-1 py-2.5 rounded-xl font-medium transition-all ${
+                  works 
+                    ? 'bg-slate-700 text-white shadow-md' 
+                    : 'bg-white/60 text-slate-500 border border-slate-200/80 hover:bg-white/80'
+                }`}
+              >
+                I work
+              </button>
+              <button 
+                onClick={() => setWorks(false)} 
+                className={`flex-1 py-2.5 rounded-xl font-medium transition-all ${
+                  !works 
+                    ? 'bg-slate-700 text-white shadow-md' 
+                    : 'bg-white/60 text-slate-500 border border-slate-200/80 hover:bg-white/80'
+                }`}
+              >
+                I don&apos;t work
+              </button>
+            </div>
+            {works && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-500 mb-2">Work days</label>
+                  <div className="flex gap-1.5">
+                    {DAYS.map((day, i) => (
+                      <button 
+                        key={day} 
+                        onClick={() => toggleWorkDay(day)} 
+                        className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-medium transition-all ${
+                          workDays.includes(day) 
+                            ? 'bg-slate-700 text-white shadow-md' 
+                            : 'bg-white/60 text-slate-400 border border-slate-200/80 hover:bg-white/80'
+                        }`}
+                      >
+                        {DAY_LABELS[i]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-500 mb-2">Start</label>
+                    <input 
+                      type="time" 
+                      value={workStart} 
+                      onChange={(e) => setWorkStart(e.target.value)} 
+                      className="w-full px-4 py-3 bg-white/60 border border-slate-200/80 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-400 text-slate-700" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-500 mb-2">End</label>
+                    <input 
+                      type="time" 
+                      value={workEnd} 
+                      onChange={(e) => setWorkEnd(e.target.value)} 
+                      className="w-full px-4 py-3 bg-white/60 border border-slate-200/80 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-400 text-slate-700" 
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </GlassCard>
+
+          {/* Commute */}
+          <GlassCard className="p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 bg-orange-100/80 rounded-xl">
+                <Car className="w-5 h-5 text-orange-600" />
+              </div>
+              <h2 className="text-lg font-semibold text-slate-700">Commute</h2>
+            </div>
+            <div className="flex items-center justify-between mb-3">
+              <label className="text-sm font-medium text-slate-500">One-way commute</label>
+              <span className="text-sm font-semibold text-orange-600 bg-orange-50 px-3 py-1 rounded-full">
+                {commuteMins} min
+              </span>
+            </div>
+            <input 
+              type="range" 
+              min="0" 
+              max="120" 
+              step="5" 
+              value={commuteMins} 
+              onChange={(e) => setCommuteMins(parseInt(e.target.value))} 
+              className="w-full accent-slate-600 h-2 bg-slate-100 rounded-full appearance-none cursor-pointer" 
+            />
+            <div className="flex justify-between text-xs text-slate-300 mt-1">
+              <span>0 min</span>
+              <span>2 hrs</span>
+            </div>
+          </GlassCard>
+
+          {/* Fixed Commitments */}
+          <GlassCard className="p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 bg-purple-100/80 rounded-xl">
+                <Calendar className="w-5 h-5 text-purple-600" />
+              </div>
+              <h2 className="text-lg font-semibold text-slate-700">Fixed Commitments</h2>
+            </div>
+            
+            {commitments.length > 0 && (
+              <div className="space-y-2 mb-4">
+                {commitments.map((c, i) => (
+                  <div key={i} className="flex items-center gap-3 bg-white/50 rounded-xl p-3 border border-slate-100">
+                    <div className="flex-1">
+                      <div className="font-medium text-slate-700">{c.name}</div>
+                      <div className="text-sm text-slate-400 capitalize">{c.day} · {c.start} - {c.end}</div>
+                    </div>
+                    <button 
+                      onClick={() => removeCommitment(i)} 
+                      className="p-2 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {showAddCommitment ? (
+              <div className="bg-slate-50/80 rounded-2xl p-4 space-y-3 border border-slate-100">
+                <input 
+                  type="text" 
+                  value={newCommitment.name} 
+                  onChange={(e) => setNewCommitment(p => ({ ...p, name: e.target.value }))} 
+                  placeholder="e.g., Football, Gym class, Kids pickup" 
+                  className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-400 text-slate-700 placeholder-slate-400" 
+                  autoFocus 
+                />
+                <div className="grid grid-cols-3 gap-2">
+                  <select 
+                    value={newCommitment.day} 
+                    onChange={(e) => setNewCommitment(p => ({ ...p, day: e.target.value }))} 
+                    className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-400 text-slate-700 text-sm"
+                  >
+                    {DAYS.map(day => <option key={day} value={day} className="capitalize">{day}</option>)}
+                  </select>
+                  <input 
+                    type="time" 
+                    value={newCommitment.start} 
+                    onChange={(e) => setNewCommitment(p => ({ ...p, start: e.target.value }))} 
+                    className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-400 text-slate-700" 
+                  />
+                  <input 
+                    type="time" 
+                    value={newCommitment.end} 
+                    onChange={(e) => setNewCommitment(p => ({ ...p, end: e.target.value }))} 
+                    className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-400 text-slate-700" 
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setShowAddCommitment(false)} 
+                    className="flex-1 py-2.5 text-slate-500 hover:bg-slate-100 rounded-xl transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={addCommitment} 
+                    disabled={!newCommitment.name.trim()} 
+                    className="flex-1 py-2.5 bg-slate-700 text-white rounded-xl font-medium disabled:opacity-50 hover:bg-slate-600 transition-colors"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button 
+                onClick={() => setShowAddCommitment(true)} 
+                className="w-full py-3.5 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 hover:border-slate-400 hover:text-slate-600 flex items-center justify-center gap-2 transition-colors"
+              >
+                <Plus className="w-5 h-5" />
+                Add commitment
+              </button>
+            )}
+          </GlassCard>
+
+          {/* Logout */}
+          <GlassCard className="p-2">
+            <button 
+              onClick={handleLogout} 
+              disabled={isLoggingOut} 
+              className="w-full flex items-center gap-4 px-4 py-3 rounded-2xl hover:bg-red-50/50 disabled:opacity-50 transition-colors"
+            >
+              <div className="p-2.5 bg-red-100/80 rounded-xl">
+                <LogOut className="w-5 h-5 text-red-600" />
+              </div>
+              <span className="font-medium text-red-600">
+                {isLoggingOut ? 'Logging out...' : 'Log Out'}
+              </span>
+              {isLoggingOut && <Loader2 className="w-4 h-4 animate-spin text-red-500 ml-auto" />}
+            </button>
+          </GlassCard>
+
+          {/* Version */}
+          <div className="text-center text-sm text-slate-300 py-6">
+            <p>Pepzi v1.0.0</p>
+          </div>
         </div>
       </div>
     </div>

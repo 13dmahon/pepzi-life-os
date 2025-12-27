@@ -1,0 +1,238 @@
+2025-12-04 18:37:37 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:37 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:38 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/availability?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:38 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:38 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:39 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/schedule?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43&start_date=2025-11-06&end_date=2026-03-26
+2025-12-04 18:37:39 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:39 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:39 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/goals?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:39 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/goals/time-budget?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:39 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:39 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:39 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:39 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:40 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/goals/time-budget?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:40 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:40 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:40 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/goals?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:40 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:40 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:41 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:42 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/goals?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:42 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/goals/time-budget?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:42 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:42 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:42 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:43 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:46 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/goals?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:46 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/goals/time-budget?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:46 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:46 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:46 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:47 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:53 OPTIONS 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/goals/conversation
+2025-12-04 18:37:53 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:54 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:55 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/chat/today-summary?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:55 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:56 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/chat/today-summary?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:56 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:56 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:57 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:37:58 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/chat/today-summary?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:37:58 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:37:59 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 18:38:03 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/chat/today-summary?user_id=b9b5a9e5-ed82-4eaa-a3d4-5ec4d8dbba43
+2025-12-04 18:38:03 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 18:38:04 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 20:53:01 GET 500 https://pepzi-backend-1029121217006.europe-west1.run.app/api/chat/today-summary?user_id=
+2025-12-04 20:53:02 ⚠️  Node.js 18 and below are deprecated and will no longer be supported in future versions of @supabase/supabase-js. Please upgrade to Node.js 20 or later. For more information, visit: https://github.com/orgs/supabase/discussions/37217
+2025-12-04 20:53:02 🔍 Loading Supabase credentials...
+2025-12-04 20:53:02    URL: ✅ Present
+2025-12-04 20:53:02    Service Key: ✅ Present
+2025-12-04 20:53:03 🚀 Pepzi Backend running on port 8080
+2025-12-04 20:53:03 ❌ CORS blocked: https://www.pepzi.io
+2025-12-04 20:53:04 Error: Not allowed by CORS
+    at origin (/app/dist/index.js:32:22)
+    at /app/node_modules/cors/lib/index.js:219:13
+    at optionsCallback (/app/node_modules/cors/lib/index.js:199:9)
+    at corsMiddleware (/app/node_modules/cors/lib/index.js:204:7)
+    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)
+    at trim_prefix (/app/node_modules/express/lib/router/index.js:328:13)
+    at /app/node_modules/express/lib/router/index.js:286:9
+    at Function.process_params (/app/node_modules/express/lib/router/index.js:346:12)
+    at next (/app/node_modules/express/lib/router/index.js:280:10)
+    at expressInit (/app/node_modules/express/lib/middleware/init.js:40:5)
+2025-12-04 21:01:34 GET 404 https://pepzi-backend-1029121217006.europe-west1.run.app/robots.txt
+2025-12-04 21:01:34 GET 200 https://pepzi-backend-1029121217006.europe-west1.run.app/

@@ -4,10 +4,12 @@ import Providers from './providers';
 import { AuthProvider } from '@/lib/auth-context';
 import TopNav from '@/components/TopNav';
 import BottomNav from '@/components/BottomNav';
+import { NavigationProvider } from '@/components/NavigationContext';
 
 export const metadata: Metadata = {
   title: 'Pepzi - AI Life OS',
-  description: 'Your AI-powered life operating system',
+  description: 'Your AI-powered life operating system. Set goals, get personalized AI plans, and track your progress to reach any summit.',
+  metadataBase: new URL('https://www.pepzi.io'),
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
@@ -15,6 +17,19 @@ export const metadata: Metadata = {
   },
   formatDetection: {
     telephone: false,
+  },
+  openGraph: {
+    title: 'Pepzi - AI Life OS',
+    description: 'Your AI-powered life operating system. Transform your goals into reality.',
+    url: 'https://www.pepzi.io',
+    siteName: 'Pepzi',
+    locale: 'en_US',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Pepzi - AI Life OS',
+    description: 'Your AI-powered life operating system. Transform your goals into reality.',
   },
 };
 
@@ -41,9 +56,11 @@ export default function RootLayout({
       <body className="font-sans antialiased min-h-screen bg-gray-50">
         <Providers>
           <AuthProvider>
-            <TopNav />
-            {children}
-            <BottomNav />
+            <NavigationProvider>
+              <TopNav />
+              {children}
+              <BottomNav />
+            </NavigationProvider>
           </AuthProvider>
         </Providers>
       </body>
