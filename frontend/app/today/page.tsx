@@ -47,7 +47,7 @@ interface TodayTask {
 }
 
 export default function TodayPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const userId = user?.id || '';
   const queryClient = useQueryClient();
   const [showNotesModal, setShowNotesModal] = useState(false);
@@ -56,6 +56,7 @@ export default function TodayPage() {
   
   const [mobileTab, setMobileTab] = useState<'tasks' | 'chat'>('tasks');
 
+  // ✅ FIXED: Added !!userId check to prevent 400 errors
   const { data: todayData, isLoading } = useQuery({
     queryKey: ['today-summary', userId],
     queryFn: async () => {
@@ -63,6 +64,7 @@ export default function TodayPage() {
       return data;
     },
     refetchInterval: 30000,
+    enabled: !!userId, // ✅ FIXED: Only fetch when userId exists
   });
 
   const completeMutation = useMutation({
@@ -111,6 +113,17 @@ export default function TodayPage() {
   const handleTaskComplete = () => {
     queryClient.invalidateQueries({ queryKey: ['today-summary'] });
   };
+
+  // ✅ FIXED: Show loading while auth is initializing
+  if (authLoading) {
+    return (
+      <WallpaperBackground>
+        <div className="h-screen flex items-center justify-center">
+          <Loader2 className="w-10 h-10 text-slate-400 animate-spin" />
+        </div>
+      </WallpaperBackground>
+    );
+  }
 
   // Task List Content
   const TaskListContent = () => (

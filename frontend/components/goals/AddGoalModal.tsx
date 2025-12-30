@@ -501,6 +501,9 @@ What's your goal?`,
     setConversationState(null);
   };
 
+  // ============================================================
+  // 🔧 FIXED: Added finally block to prevent infinite loading
+  // ============================================================
   const createGoalAndPlan = async (
     goalData: ConversationGoal,
     milestones: ConversationMilestone[],
@@ -571,14 +574,14 @@ What's your goal?`,
       };
       setMessages(prev => [...prev, successMessage]);
 
+      // Small delay to show success message before closing
       setTimeout(() => {
-        setIsCreatingPlan(false);
         onGoalCreated();
         onClose();
       }, 1500);
+      
     } catch (error) {
       console.error('Error creating goal/plan:', error);
-      setIsCreatingPlan(false);
       setView('chat');
       const errorMessage: Message = {
         role: 'assistant',
@@ -587,6 +590,10 @@ What's your goal?`,
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      // ✅ CRITICAL FIX: Always reset loading state regardless of success/failure/timeout
+      // This prevents the infinite spinner bug that ayaPapaya experienced
+      setIsCreatingPlan(false);
     }
   };
 

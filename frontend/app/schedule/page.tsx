@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/GlassUI';
 
 export default function SchedulePage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const userId = user?.id || '';
   const queryClient = useQueryClient();
   
@@ -51,6 +51,7 @@ export default function SchedulePage() {
   const monthStart = startOfMonth(monthDate);
   const monthEnd = endOfMonth(monthDate);
 
+  // ✅ FIXED: Added !!userId check to prevent 400 errors when auth not ready
   const {
     data: weekBlocks = [],
     isLoading: isLoadingWeek,
@@ -67,9 +68,10 @@ export default function SchedulePage() {
       const response = await scheduleAPI.getBlocks(userId, startStr, endStr);
       return response.blocks || response;
     },
-    enabled: viewMode === 'week',
+    enabled: viewMode === 'week' && !!userId, // ✅ FIXED
   });
 
+  // ✅ FIXED: Added !!userId check
   const {
     data: monthBlocks = [],
     isLoading: isLoadingMonth,
@@ -81,19 +83,21 @@ export default function SchedulePage() {
       const response = await scheduleAPI.getBlocks(userId, startStr, endStr);
       return response.blocks || response;
     },
-    enabled: viewMode === 'month',
+    enabled: viewMode === 'month' && !!userId, // ✅ FIXED
   });
 
+  // ✅ FIXED: Added !!userId check
   const { data: goalsData, isLoading: isLoadingGoals } = useQuery({
     queryKey: ['goals', userId, 'year'],
     queryFn: () => goalsAPI.getGoals(userId),
-    enabled: viewMode === 'year',
+    enabled: viewMode === 'year' && !!userId, // ✅ FIXED
   });
 
+  // ✅ FIXED: Added !!userId check
   const { data: availabilityData } = useQuery({
     queryKey: ['availability', userId],
     queryFn: () => availabilityAPI.get(userId),
-    enabled: viewMode === 'week',
+    enabled: viewMode === 'week' && !!userId, // ✅ FIXED
   });
 
   const generateMutation = useMutation({
@@ -108,7 +112,7 @@ export default function SchedulePage() {
     },
   });
 
-  const isLoading = viewMode === 'week' ? isLoadingWeek : viewMode === 'month' ? isLoadingMonth : isLoadingGoals;
+  const isLoading = authLoading || (viewMode === 'week' ? isLoadingWeek : viewMode === 'month' ? isLoadingMonth : isLoadingGoals);
 
   const stats = useMemo(() => {
     const blocks = viewMode === 'week' ? weekBlocks : monthBlocks;
@@ -129,6 +133,17 @@ export default function SchedulePage() {
   const handleGoalClick = (goalId: string) => {
     window.location.href = `/goals?highlight=${goalId}`;
   };
+
+  // ✅ Show loading while auth is initializing
+  if (authLoading) {
+    return (
+      <WallpaperBackground>
+        <div className="h-screen flex items-center justify-center">
+          <Loader2 className="w-10 h-10 text-slate-400 animate-spin" />
+        </div>
+      </WallpaperBackground>
+    );
+  }
 
   return (
     <WallpaperBackground>
@@ -166,7 +181,7 @@ export default function SchedulePage() {
               {viewMode === 'week' && (
                 <button
                   onClick={() => generateMutation.mutate()}
-                  disabled={generateMutation.isPending}
+                  disabled={generateMutation.isPending || !userId}
                   className="p-2.5 bg-white/40 hover:bg-white/60 rounded-xl disabled:opacity-50 transition-all"
                   title="Regenerate schedule"
                 >
