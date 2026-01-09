@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { format, startOfWeek, addDays, isSameDay, parseISO, setHours, setMinutes, startOfDay, addWeeks, isBefore, isToday, isYesterday, isTomorrow, differenceInDays } from 'date-fns';
 import {
-  ChevronLeft, ChevronRight, Plus, GripVertical, Check, Briefcase, Moon, Car, Users, Dumbbell, X, Clock, Target, CheckCircle, Circle, Ban, Calendar, AlertTriangle, ArrowUp, CalendarDays, Edit3, Trash2,
+  ChevronLeft, ChevronRight, Plus, GripVertical, Check, Briefcase, Moon, Car, Users, Dumbbell, X, Clock, Target, CheckCircle, Circle, Ban, Calendar, AlertTriangle, ArrowUp, CalendarDays, Edit3, Trash2, ExternalLink, LayoutGrid, CalendarRange,
 } from 'lucide-react';
 import { scheduleAPI } from '@/lib/api';
 import {
@@ -25,7 +25,7 @@ interface ScheduleBlock {
   status: string;
   notes?: string;
   created_by?: string;
-  goals?: { name: string; category?: string };
+  goals?: { name: string; category?: string; description?: string };
 }
 
 interface UserAvailability {
@@ -52,6 +52,20 @@ interface DroppableData {
   date: Date;
 }
 
+// Template block - represents a recurring time slot pattern
+interface TemplateBlock {
+  id: string;
+  dayOfWeek: number;
+  hour: number;
+  minute: number;
+  duration_mins: number;
+  notes?: string;
+  type: string;
+  goal_id?: string;
+  goals?: { name: string; category?: string; description?: string };
+  allBlockIds: string[];
+}
+
 // ============================================================
 // CONSTANTS
 // ============================================================
@@ -66,7 +80,7 @@ const HOURS = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR
 const SLOT_INTERVAL = 15;
 
 // ============================================================
-// STYLE HELPERS - ENHANCED WITH CATEGORY COLORS
+// STYLE HELPERS
 // ============================================================
 
 const getBlockStyle = (type: string, category?: string): string => {
@@ -135,12 +149,13 @@ const parseTime = (timeStr: string): { hours: number; minutes: number } => {
   return { hours, minutes };
 };
 
-const isDraggableBlock = (block: ScheduleBlock): boolean => {
-  return (block.type === 'workout' || block.type === 'training') && block.status !== 'completed';
+const isDraggableBlock = (block: ScheduleBlock | TemplateBlock): boolean => {
+  const type = block.type;
+  return (type === 'workout' || type === 'training');
 };
 
 const isBlockerType = (type: string): boolean => ['work', 'commute', 'event', 'social', 'sleep'].includes(type);
-const isTrainingBlock = (block: ScheduleBlock): boolean => block.type === 'workout' || block.type === 'training';
+const isTrainingBlock = (block: ScheduleBlock | TemplateBlock): boolean => block.type === 'workout' || block.type === 'training';
 
 const formatDateLabel = (date: Date): string => {
   if (isToday(date)) return 'Today';
@@ -150,7 +165,7 @@ const formatDateLabel = (date: Date): string => {
 };
 
 // ============================================================
-// CURRENT TIME INDICATOR - NEW
+// CURRENT TIME INDICATOR
 // ============================================================
 
 function CurrentTimeIndicator() {
@@ -187,7 +202,7 @@ function OverlapWarning({ show, message, onClose }: { show: boolean; message: st
     <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
       <div className="bg-rose-500/90 backdrop-blur-sm text-white px-6 py-3 rounded-xl shadow-lg flex items-center gap-3">
         <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-        <div><p className="font-medium">Can't place here</p><p className="text-sm text-rose-100">{message}</p></div>
+        <div><p className="font-medium">Can&apos;t place here</p><p className="text-sm text-rose-100">{message}</p></div>
         <button onClick={onClose} className="p-1 hover:bg-rose-600 rounded"><X className="w-4 h-4" /></button>
       </div>
     </div>
@@ -195,7 +210,7 @@ function OverlapWarning({ show, message, onClose }: { show: boolean; message: st
 }
 
 // ============================================================
-// AVAILABILITY BACKGROUND BLOCK - ENHANCED STYLING
+// AVAILABILITY BACKGROUND BLOCK
 // ============================================================
 
 function AvailabilityBlock({ block }: { block: { type: string; startHour: number; startMin: number; durationMins: number; label: string } }) {
@@ -324,7 +339,6 @@ function MobileAgendaView({ blocks, availability, userId, onBlockClick, onAddCli
 
   return (
     <div className="flex flex-col h-full">
-      {/* Week Selector Header */}
       <div className="backdrop-blur-xl bg-white/70 border-b border-white/40 px-4 py-3">
         <div className="flex items-center justify-between mb-3">
           <button onClick={() => setWeekOffset(prev => prev - 1)} className="p-2 hover:bg-white/50 rounded-full transition-colors">
@@ -351,7 +365,6 @@ function MobileAgendaView({ blocks, availability, userId, onBlockClick, onAddCli
         </div>
       </div>
 
-      {/* Scrollable Agenda */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto" onScroll={handleScroll}>
         {allDates.map((date) => {
           const dateKey = format(date, 'yyyy-MM-dd');
@@ -449,7 +462,40 @@ function MobileAgendaView({ blocks, availability, userId, onBlockClick, onAddCli
 }
 
 // ============================================================
-// DRAGGABLE BLOCK WITH QUICK ACTIONS
+// TEMPLATE BLOCK COMPONENT (for Template Week View)
+// ============================================================
+
+function TemplateBlockComponent({ block, top, height, onClick }: { 
+  block: TemplateBlock; top: number; height: number; 
+  onClick?: (block: TemplateBlock) => void 
+}) {
+  const category = block.goals?.category || block.type;
+  const styleClass = getBlockStyle(block.type, category);
+  const formattedTime = format(setMinutes(setHours(new Date(), block.hour), block.minute), 'h:mm a');
+  const notesParts = (block.notes || '').split('|||');
+  const displayName = notesParts[0] || block.goals?.name || block.type;
+  const isTraining = isTrainingBlock(block);
+  
+  return (
+    <div
+      className={`absolute left-1 right-1 rounded-lg border-2 px-2 py-1 overflow-hidden group ${styleClass} ${height < 40 ? 'text-xs' : 'text-sm'} cursor-pointer hover:shadow-lg hover:z-20 transition-all`}
+      style={{ top: `${top}px`, height: `${Math.max(height - 2, 24)}px`, zIndex: 10 }}
+      onClick={() => onClick?.(block)}
+    >
+      <div className="flex items-start gap-1 h-full">
+        {isTraining && <GripVertical className="w-3 h-3 opacity-40 flex-shrink-0 mt-0.5" />}
+        {!isTraining && getBlockIcon(block.type)}
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="font-medium truncate leading-tight">{displayName}</div>
+          {height >= 50 && <div className="text-xs opacity-75 leading-tight">{formattedTime} · {block.duration_mins}min</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// DRAGGABLE BLOCK (for Calendar View)
 // ============================================================
 
 function DraggableBlock({ block, top, height, onComplete, onDelete, onClick }: { 
@@ -541,7 +587,7 @@ function DragOverlayBlock({ block }: { block: ScheduleBlock }) {
 }
 
 // ============================================================
-// ADD BLOCK MODAL - ENHANCED WITH TRAINING TYPE
+// ADD BLOCK MODAL
 // ============================================================
 
 function AddBlockModal({ isOpen, onClose, onAdd, selectedDay, selectedHour }: { 
@@ -620,7 +666,7 @@ function AddBlockModal({ isOpen, onClose, onAdd, selectedDay, selectedHour }: {
                 { value: 'event', label: 'Event', icon: <Users className="w-4 h-4" />, color: 'violet' },
                 { value: 'training', label: 'Training', icon: <Dumbbell className="w-4 h-4" />, color: 'emerald' },
               ].map((option) => (
-                <button key={option.value} onClick={() => setType(option.value as any)} className={`flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-xl border-2 transition-colors ${
+                <button key={option.value} onClick={() => setType(option.value as typeof type)} className={`flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-xl border-2 transition-colors ${
                   type === option.value 
                     ? option.color === 'emerald' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' 
                       : option.color === 'violet' ? 'border-violet-500 bg-violet-50 text-violet-700'
@@ -726,107 +772,80 @@ function CompleteWithNotesModal({ block, onClose, onComplete, isLoading }: {
 }
 
 // ============================================================
-// EDIT BLOCK MODAL - NEW
+// TEMPLATE DETAIL MODAL (for Template Week View)
 // ============================================================
 
-function EditBlockModal({ block, onClose, onSave, onDelete, isLoading }: {
-  block: ScheduleBlock | null;
+function TemplateDetailModal({ block, onClose }: {
+  block: TemplateBlock | null; 
   onClose: () => void;
-  onSave: (blockId: string, updates: { scheduled_start?: string; duration_mins?: number; notes?: string }) => void;
-  onDelete?: (id: string) => void;
-  isLoading?: boolean;
 }) {
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState('');
-  const [duration, setDuration] = useState(60);
-  const [notes, setNotes] = useState('');
-  
-  useEffect(() => {
-    if (block) {
-      const blockDate = parseISO(block.scheduled_start);
-      setDate(format(blockDate, 'yyyy-MM-dd'));
-      setTime(format(blockDate, 'HH:mm'));
-      setDuration(block.duration_mins);
-      const notesParts = (block.notes || '').split('|||');
-      setNotes(notesParts[0] || '');
-    }
-  }, [block?.id]);
-  
   if (!block) return null;
   
-  const isTraining = isTrainingBlock(block);
+  const notesParts = (block.notes || '').split('|||');
+  const sessionName = notesParts[0] || block.goals?.name || 'Session';
+  const sessionDescription = notesParts[1] || '';
+  const sessionTip = notesParts[2] || '';
   const category = block.goals?.category || block.type;
-  
-  const handleSave = () => {
-    const newStart = new Date(`${date}T${time}`).toISOString();
-    onSave(block.id, { scheduled_start: newStart, duration_mins: duration, notes: notes || undefined });
-  };
-  
+  const dayName = DAY_NAMES[block.dayOfWeek];
+  const timeStr = format(setMinutes(setHours(new Date(), block.hour), block.minute), 'h:mm a');
+  const endTime = format(setMinutes(setHours(new Date(), block.hour), block.minute + block.duration_mins), 'h:mm a');
+
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end md:items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white/95 backdrop-blur-xl rounded-t-3xl md:rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-white/80" onClick={(e) => e.stopPropagation()}>
-        <div className={`p-4 ${getHeaderColor(block.type, category)} text-white`}>
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-white/20 rounded-xl"><Edit3 className="w-5 h-5" /></div>
+      <div className="bg-white/95 backdrop-blur-xl rounded-t-3xl md:rounded-3xl w-full max-w-md shadow-2xl overflow-hidden max-h-[90vh] flex flex-col border border-white/80" onClick={(e) => e.stopPropagation()}>
+        <div className={`p-4 ${getHeaderColor(block.type, category)} text-white flex-shrink-0`}>
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-white/20 rounded-xl">{getBlockIcon(block.type) || <Clock className="w-5 h-5" />}</div>
             <div className="flex-1">
-              <h3 className="font-bold text-lg">Edit Block</h3>
-              <p className="text-sm opacity-80">{block.goals?.name || getBlockTypeName(block.type)}</p>
+              <h3 className="font-bold text-lg leading-tight">{sessionName}</h3>
+              {block.goals?.name && sessionName !== block.goals.name && <p className="text-sm opacity-80 mt-0.5">{block.goals.name}</p>}
             </div>
-            <button onClick={onClose} className="p-1 hover:bg-white/20 rounded"><X className="w-5 h-5" /></button>
+            <button onClick={onClose} className="p-1.5 hover:bg-white/20 rounded-lg"><X className="w-5 h-5" /></button>
           </div>
         </div>
         
-        <div className="p-5 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-slate-600 mb-1.5">Date</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-3 py-2.5 border border-slate-200 bg-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 text-slate-700" />
+        <div className="p-4 space-y-4 overflow-y-auto flex-1">
+          <div className="bg-indigo-50/80 backdrop-blur-sm rounded-xl p-3 border border-indigo-200/50">
+            <div className="flex items-center gap-2 text-indigo-700">
+              <LayoutGrid className="w-4 h-4" />
+              <span className="text-sm font-medium">Weekly Schedule</span>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-600 mb-1.5">Time</label>
-              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full px-3 py-2.5 border border-slate-200 bg-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 text-slate-700" />
-            </div>
+            <p className="text-sm text-indigo-600 mt-1">This session repeats every {dayName}</p>
           </div>
           
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-sm font-medium text-slate-600">Duration</label>
-              <span className="text-sm font-bold text-indigo-600">{duration} mins</span>
-            </div>
-            <input type="range" min={15} max={180} step={15} value={duration} onChange={(e) => setDuration(Number(e.target.value))} className="w-full accent-indigo-500 h-2" />
-            <div className="flex justify-between text-xs text-slate-400 mt-1">
-              <span>15m</span><span>1h</span><span>2h</span><span>3h</span>
-            </div>
-          </div>
+          {sessionDescription && <div className="bg-white/50 backdrop-blur-sm rounded-xl p-3 border border-white/60"><p className="text-slate-600 text-sm leading-relaxed">{sessionDescription}</p></div>}
+          {sessionTip && <div className="bg-amber-50/80 backdrop-blur-sm border border-amber-200/50 rounded-xl p-3"><div className="flex items-start gap-2"><span className="text-lg">💡</span><p className="text-amber-800 text-sm leading-relaxed">{sessionTip}</p></div></div>}
           
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1.5">{isTraining ? 'Session Name' : 'Notes'}</label>
-            <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={isTraining ? "e.g., Tempo Run, Upper Body" : "Optional notes..."} className="w-full px-3 py-2.5 border border-slate-200 bg-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 text-slate-700 placeholder:text-slate-400" />
+          <div className="flex items-center gap-3 text-slate-600">
+            <Clock className="w-5 h-5 text-slate-400" />
+            <div>
+              <div className="font-medium">{dayName} · {timeStr}</div>
+              <div className="text-sm text-slate-400">{block.duration_mins} minutes (until {endTime})</div>
+            </div>
           </div>
           
           {block.goals && (
-            <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-xl">
-              <Target className="w-4 h-4 text-slate-400" />
-              <div>
-                <div className="text-sm font-medium text-slate-700">{block.goals.name}</div>
-                <div className="text-xs text-slate-400 capitalize">{block.goals.category} goal</div>
+            <div className="bg-slate-50/80 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-white rounded-lg"><Target className="w-5 h-5 text-slate-500" /></div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-slate-700">{block.goals.name}</div>
+                  <div className="text-xs text-slate-400 capitalize mt-0.5">{block.goals.category} goal</div>
+                </div>
               </div>
+              {block.goal_id && (
+                <a href={`/goals?highlight=${block.goal_id}`} className="flex items-center justify-center gap-1.5 mt-3 px-3 py-2 bg-white hover:bg-slate-100 rounded-lg text-sm text-slate-600 font-medium transition-colors border border-slate-200">
+                  <ExternalLink className="w-4 h-4" />View Full Goal
+                </a>
+              )}
             </div>
           )}
         </div>
         
-        <div className="p-4 border-t border-slate-100 bg-slate-50/50 space-y-2">
-          <div className="flex gap-3">
-            <button onClick={onClose} disabled={isLoading} className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl hover:bg-white font-medium disabled:opacity-50">Cancel</button>
-            <button onClick={handleSave} disabled={isLoading} className="flex-1 px-4 py-2.5 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 font-medium flex items-center justify-center gap-2 disabled:opacity-50">
-              <Check className="w-4 h-4" />{isLoading ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
-          {onDelete && (
-            <button onClick={() => { if (window.confirm('Delete this block? This cannot be undone.')) { onDelete(block.id); onClose(); }}} disabled={isLoading} className="w-full px-4 py-2 text-rose-600 hover:bg-rose-50 rounded-xl text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2">
-              <Trash2 className="w-4 h-4" />Delete Block
-            </button>
-          )}
+        <div className="p-4 border-t border-slate-100 bg-white/50 backdrop-blur-sm flex-shrink-0">
+          <button onClick={onClose} className="w-full px-4 py-2.5 bg-slate-700 text-white rounded-xl hover:bg-slate-600 font-medium">
+            Close
+          </button>
         </div>
       </div>
     </div>
@@ -834,31 +853,13 @@ function EditBlockModal({ block, onClose, onSave, onDelete, isLoading }: {
 }
 
 // ============================================================
-// SESSION DETAIL MODAL - ENHANCED
+// SESSION DETAIL MODAL (for Calendar View)
 // ============================================================
 
-function SessionDetailModal({ block, onClose, onComplete, onDelete, onEdit, onPushToNextWeek, onSkip, onCompleteEarly, onReschedule }: {
+function SessionDetailModal({ block, onClose, onComplete, onDelete, onEdit }: {
   block: ScheduleBlock | null; onClose: () => void; onComplete?: (id: string) => void; onDelete?: (id: string) => void;
   onEdit?: (block: ScheduleBlock) => void;
-  onPushToNextWeek?: (id: string) => Promise<{ deadline_impact?: string }>; onSkip?: (id: string) => Promise<{ deadline_impact?: string }>;
-  onCompleteEarly?: (id: string) => Promise<{ deadline_impact?: string }>; onReschedule?: (id: string, newDateTime: string) => Promise<void>;
 }) {
-  const [isLoading, setIsLoading] = useState(false);
-  const [actionResult, setActionResult] = useState<{ message: string; type: 'success' | 'warning' | 'error' } | null>(null);
-  const [showConfirmPush, setShowConfirmPush] = useState(false);
-  const [showReschedule, setShowReschedule] = useState(false);
-  const [rescheduleDate, setRescheduleDate] = useState('');
-  const [rescheduleTime, setRescheduleTime] = useState('');
-
-  useEffect(() => {
-    if (block) {
-      setActionResult(null); setShowConfirmPush(false); setShowReschedule(false);
-      const blockDate = parseISO(block.scheduled_start);
-      setRescheduleDate(format(blockDate, 'yyyy-MM-dd'));
-      setRescheduleTime(format(blockDate, 'HH:mm'));
-    }
-  }, [block?.id]);
-
   if (!block) return null;
   
   const isCompleted = block.status === 'completed';
@@ -872,34 +873,6 @@ function SessionDetailModal({ block, onClose, onComplete, onDelete, onEdit, onPu
   const sessionDescription = notesParts[1] || '';
   const sessionTip = notesParts[2] || '';
   const category = block.goals?.category || block.type;
-
-  const handlePushToNextWeek = async () => {
-    if (!onPushToNextWeek) return; setIsLoading(true);
-    try { const result = await onPushToNextWeek(block.id); setActionResult({ message: result.deadline_impact ? `Pushed to next week. ${result.deadline_impact}` : 'Pushed to next week!', type: result.deadline_impact ? 'warning' : 'success' }); setTimeout(() => onClose(), 2000); }
-    catch { setActionResult({ message: 'Failed to push session', type: 'error' }); }
-    finally { setIsLoading(false); setShowConfirmPush(false); }
-  };
-  
-  const handleSkip = async () => {
-    if (!onSkip) return; setIsLoading(true);
-    try { const result = await onSkip(block.id); setActionResult({ message: result.deadline_impact ? `Skipped. ${result.deadline_impact}` : 'Session skipped', type: result.deadline_impact ? 'warning' : 'success' }); setTimeout(() => onClose(), 2000); }
-    catch { setActionResult({ message: 'Failed to skip session', type: 'error' }); }
-    finally { setIsLoading(false); }
-  };
-  
-  const handleCompleteEarly = async () => {
-    if (!onCompleteEarly) return; setIsLoading(true);
-    try { const result = await onCompleteEarly(block.id); setActionResult({ message: result.deadline_impact || 'Goal completed early! 🎉', type: 'success' }); setTimeout(() => onClose(), 2000); }
-    catch { setActionResult({ message: 'Failed to complete early', type: 'error' }); }
-    finally { setIsLoading(false); }
-  };
-  
-  const handleReschedule = async () => {
-    if (!onReschedule || !rescheduleDate || !rescheduleTime) return; setIsLoading(true);
-    try { await onReschedule(block.id, new Date(`${rescheduleDate}T${rescheduleTime}`).toISOString()); setActionResult({ message: 'Rescheduled successfully!', type: 'success' }); setTimeout(() => onClose(), 1500); }
-    catch { setActionResult({ message: 'Failed to reschedule', type: 'error' }); }
-    finally { setIsLoading(false); setShowReschedule(false); }
-  };
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end md:items-center justify-center z-50" onClick={onClose}>
@@ -922,97 +895,48 @@ function SessionDetailModal({ block, onClose, onComplete, onDelete, onEdit, onPu
           </div>
         </div>
         
-        {actionResult && (
-          <div className={`px-4 py-3 flex items-center gap-2 ${actionResult.type === 'success' ? 'bg-emerald-50/80 text-emerald-800' : actionResult.type === 'warning' ? 'bg-amber-50/80 text-amber-800' : 'bg-rose-50/80 text-rose-800'}`}>
-            {actionResult.type === 'warning' && <AlertTriangle className="w-4 h-4" />}
-            {actionResult.type === 'success' && <Check className="w-4 h-4" />}
-            <span className="text-sm font-medium">{actionResult.message}</span>
-          </div>
-        )}
-        
         <div className="p-4 space-y-4 overflow-y-auto flex-1">
           {sessionDescription && <div className="bg-white/50 backdrop-blur-sm rounded-xl p-3 border border-white/60"><p className="text-slate-600 text-sm leading-relaxed">{sessionDescription}</p></div>}
           {sessionTip && <div className="bg-amber-50/80 backdrop-blur-sm border border-amber-200/50 rounded-xl p-3"><div className="flex items-start gap-2"><span className="text-lg">💡</span><p className="text-amber-800 text-sm leading-relaxed">{sessionTip}</p></div></div>}
           <div className="flex items-center gap-3 text-slate-600"><Clock className="w-5 h-5 text-slate-400" /><div><div className="font-medium">{startTime}</div><div className="text-sm text-slate-400">{block.duration_mins} minutes (until {endTime})</div></div></div>
-          {block.goals && <div className="flex items-center gap-3 text-slate-600"><Target className="w-5 h-5 text-slate-400" /><div><div className="font-medium">{block.goals.name}</div><div className="text-sm text-slate-400 capitalize">{block.goals.category} goal</div></div></div>}
+          
+          {block.goals && (
+            <div className="bg-slate-50/80 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-white rounded-lg"><Target className="w-5 h-5 text-slate-500" /></div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-slate-700">{block.goals.name}</div>
+                  <div className="text-xs text-slate-400 capitalize mt-0.5">{block.goals.category} goal</div>
+                </div>
+              </div>
+              {block.goal_id && (
+                <a href={`/goals?highlight=${block.goal_id}`} className="flex items-center justify-center gap-1.5 mt-3 px-3 py-2 bg-white hover:bg-slate-100 rounded-lg text-sm text-slate-600 font-medium transition-colors border border-slate-200">
+                  <ExternalLink className="w-4 h-4" />View Full Goal
+                </a>
+              )}
+            </div>
+          )}
+          
           <div className="flex items-center gap-3">{isCompleted ? <><CheckCircle className="w-5 h-5 text-emerald-500" /><span className="text-emerald-600 font-medium">Completed</span></> : isSkipped ? <><Ban className="w-5 h-5 text-slate-400" /><span className="text-slate-500 font-medium">Skipped</span></> : <><Circle className="w-5 h-5 text-slate-400" /><span className="text-slate-500">Scheduled</span></>}</div>
         </div>
         
-        {showReschedule && (
-          <div className="p-4 bg-slate-50/80 backdrop-blur-sm border-t border-slate-200/50">
-            <div className="flex items-center gap-2 mb-3"><CalendarDays className="w-5 h-5 text-slate-500" /><p className="font-medium text-slate-700">Reschedule Session</p></div>
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div><label className="block text-xs text-slate-500 mb-1">Date</label><input type="date" value={rescheduleDate} onChange={(e) => setRescheduleDate(e.target.value)} className="w-full px-3 py-2 border border-white/60 bg-white/50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" /></div>
-              <div><label className="block text-xs text-slate-500 mb-1">Time</label><input type="time" value={rescheduleTime} onChange={(e) => setRescheduleTime(e.target.value)} className="w-full px-3 py-2 border border-white/60 bg-white/50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" /></div>
-            </div>
-            <div className="flex gap-2"><button onClick={() => setShowReschedule(false)} className="flex-1 px-3 py-2 border border-slate-200 text-slate-600 rounded-xl hover:bg-white/50 text-sm font-medium" disabled={isLoading}>Cancel</button><button onClick={handleReschedule} className="flex-1 px-3 py-2 bg-slate-700 text-white rounded-xl hover:bg-slate-600 text-sm font-medium" disabled={isLoading}>{isLoading ? 'Saving...' : 'Confirm'}</button></div>
-          </div>
-        )}
-        
-        {showConfirmPush && (
-          <div className="p-4 bg-amber-50/80 backdrop-blur-sm border-t border-amber-200/50">
-            <div className="flex items-start gap-2 mb-3"><AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" /><div><p className="font-medium text-amber-800">Push to next week?</p><p className="text-sm text-amber-700 mt-1">This may delay your goal deadline.</p></div></div>
-            <div className="flex gap-2"><button onClick={() => setShowConfirmPush(false)} className="flex-1 px-3 py-2 border border-slate-200 text-slate-600 rounded-xl hover:bg-white/50 text-sm font-medium" disabled={isLoading}>Cancel</button><button onClick={handlePushToNextWeek} className="flex-1 px-3 py-2 bg-amber-500 text-white rounded-xl hover:bg-amber-600 text-sm font-medium" disabled={isLoading}>{isLoading ? 'Pushing...' : 'Yes, Push'}</button></div>
-          </div>
-        )}
-        
-        {isTraining && !isCompleted && !isSkipped && !showConfirmPush && !showReschedule && !actionResult && (
+        {isTraining && !isCompleted && !isSkipped && (
           <div className="p-4 border-t border-slate-100 bg-white/50 backdrop-blur-sm flex-shrink-0 space-y-2">
             <div className="flex gap-2">
-              {onComplete && <button onClick={() => { onComplete(block.id); onClose(); }} disabled={isLoading} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 text-white rounded-xl hover:bg-emerald-600 font-medium disabled:opacity-50"><Check className="w-4 h-4" />Log It</button>}
-              {onCompleteEarly && block.goal_id && <button onClick={handleCompleteEarly} disabled={isLoading} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-700 text-white rounded-xl hover:bg-slate-600 font-medium disabled:opacity-50"><CheckCircle className="w-4 h-4" />Complete Goal</button>}
+              {onComplete && <button onClick={() => { onComplete(block.id); onClose(); }} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 text-white rounded-xl hover:bg-emerald-600 font-medium"><Check className="w-4 h-4" />Log It</button>}
             </div>
-            <div className="flex gap-2">
-              {onReschedule && <button onClick={() => setShowReschedule(true)} disabled={isLoading} className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 text-slate-600 rounded-xl hover:bg-white/50 text-sm font-medium disabled:opacity-50"><CalendarDays className="w-4 h-4" />Reschedule</button>}
-              {onPushToNextWeek && <button onClick={() => setShowConfirmPush(true)} disabled={isLoading} className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 text-slate-600 rounded-xl hover:bg-white/50 text-sm font-medium disabled:opacity-50"><Calendar className="w-4 h-4" />Push Week</button>}
-            </div>
-            <div className="flex gap-2">
-              {onSkip && <button onClick={handleSkip} disabled={isLoading} className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 text-slate-500 rounded-xl hover:bg-white/50 text-sm font-medium disabled:opacity-50"><Ban className="w-4 h-4" />Skip</button>}
-              {onDelete && <button onClick={() => { if (window.confirm('Delete this session?')) { onDelete(block.id); onClose(); }}} disabled={isLoading} className="flex-1 px-3 py-2 text-rose-600 hover:bg-rose-50/50 border border-rose-200 rounded-xl text-sm font-medium disabled:opacity-50">Delete</button>}
-            </div>
+            {onDelete && (
+              <button onClick={() => { if (window.confirm('Delete this session?')) { onDelete(block.id); onClose(); }}} className="w-full px-3 py-2 text-rose-600 hover:bg-rose-50/50 border border-rose-200 rounded-xl text-sm font-medium">Delete</button>
+            )}
           </div>
         )}
         
-        {isUserBlock && !actionResult && (
+        {isUserBlock && (
           <div className="p-4 border-t border-slate-100 bg-white/50 backdrop-blur-sm flex-shrink-0 flex gap-2">
-            {onEdit && <button onClick={() => { onEdit(block); onClose(); }} disabled={isLoading} className="flex-1 px-4 py-2 border border-slate-200 text-slate-600 hover:bg-white/50 rounded-xl text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"><Edit3 className="w-4 h-4" />Edit</button>}
-            {onDelete && <button onClick={() => { if (window.confirm('Delete this block?')) { onDelete(block.id); onClose(); }}} disabled={isLoading} className="flex-1 px-4 py-2 text-rose-600 hover:bg-rose-50/50 border border-rose-200 rounded-xl text-sm font-medium disabled:opacity-50">Delete Block</button>}
+            {onEdit && <button onClick={() => { onEdit(block); onClose(); }} className="flex-1 px-4 py-2 border border-slate-200 text-slate-600 hover:bg-white/50 rounded-xl text-sm font-medium flex items-center justify-center gap-2"><Edit3 className="w-4 h-4" />Edit</button>}
+            {onDelete && <button onClick={() => { if (window.confirm('Delete this block?')) { onDelete(block.id); onClose(); }}} className="flex-1 px-4 py-2 text-rose-600 hover:bg-rose-50/50 border border-rose-200 rounded-xl text-sm font-medium">Delete Block</button>}
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// APPLY TO FUTURE MODAL
-// ============================================================
-
-function ApplyToFutureModal({ pendingMove, onConfirm, onCancel, isLoading }: { 
-  pendingMove: { block: ScheduleBlock; newStart: string; newDayIndex: number; newHour: number; newMinute: number } | null; 
-  onConfirm: (applyToFuture: boolean) => void; onCancel: () => void; isLoading?: boolean 
-}) {
-  if (!pendingMove) return null;
-  const { block, newDayIndex, newHour, newMinute } = pendingMove;
-  const notesParts = (block.notes || '').split('|||');
-  const sessionName = notesParts[0] || block.goals?.name || 'this session';
-  const newTimeStr = format(setMinutes(setHours(new Date(), newHour), newMinute), 'h:mm a');
-  const newDayStr = DAY_NAMES[newDayIndex];
-  
-  return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end md:items-center justify-center z-50" onClick={onCancel}>
-      <div className="bg-white/95 backdrop-blur-xl rounded-t-3xl md:rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-white/80" onClick={(e) => e.stopPropagation()}>
-        <div className="bg-slate-700 p-4 text-white">
-          <div className="flex items-center gap-3"><div className="p-2 bg-white/20 rounded-xl"><GripVertical className="w-5 h-5" /></div><div><h3 className="font-bold text-lg">Session Moved</h3><p className="text-sm opacity-80">Apply this change to future sessions?</p></div></div>
-        </div>
-        <div className="p-6">
-          <div className="bg-white/50 backdrop-blur-sm rounded-xl p-4 mb-6 border border-white/60"><div className="font-medium text-slate-700 mb-2">{sessionName}</div><div className="text-sm text-slate-500">→ Moving to <span className="font-medium text-slate-700">{newDayStr}</span> at <span className="font-medium text-slate-700">{newTimeStr}</span></div></div>
-          <div className="space-y-3">
-            <button onClick={() => onConfirm(true)} disabled={isLoading} className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-700 text-white rounded-xl hover:bg-slate-600 font-medium disabled:opacity-50"><Calendar className="w-4 h-4" />Apply to all future sessions</button>
-            <button onClick={() => onConfirm(false)} disabled={isLoading} className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white/50 border border-white/60 text-slate-600 rounded-xl hover:bg-white/70 font-medium disabled:opacity-50">Just this session</button>
-            <button onClick={onCancel} disabled={isLoading} className="w-full px-4 py-2 text-slate-400 hover:text-slate-600 text-sm">Cancel</button>
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -1025,15 +949,17 @@ function ApplyToFutureModal({ pendingMove, onConfirm, onCancel, isLoading }: {
 export default function HourlyCalendar({ blocks, availability, userId, onBlockUpdate, weekOffset, setWeekOffset }: HourlyCalendarProps) {
   const queryClient = useQueryClient();
   const [showAddModal, setShowAddModal] = useState(false);
-  const [pendingMove, setPendingMove] = useState<{ block: ScheduleBlock; newStart: string; newDayIndex: number; newHour: number; newMinute: number } | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<{ day: string; hour: number } | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null);
-  const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null);
+  const [selectedTemplateBlock, setSelectedTemplateBlock] = useState<TemplateBlock | null>(null);
   const [blockToComplete, setBlockToComplete] = useState<ScheduleBlock | null>(null);
   const [activeBlock, setActiveBlock] = useState<ScheduleBlock | null>(null);
   const [overlapWarning, setOverlapWarning] = useState<{ message: string; blockingType: string; show: boolean }>({ message: '', blockingType: '', show: false });
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isMobile, setIsMobile] = useState(false);
+  
+  // View mode: 'template' for weekly template, 'calendar' for actual dates
+  const [viewMode, setViewMode] = useState<'template' | 'calendar'>('template');
 
   useEffect(() => { 
     const checkMobile = () => setIsMobile(window.innerWidth < 768); 
@@ -1042,101 +968,86 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
     return () => window.removeEventListener('resize', checkMobile); 
   }, []);
 
+  // Auto-scroll to 6am for template view
+  useEffect(() => {
+    if (scrollRef.current) {
+      const scrollTo = Math.max(0, (6 - START_HOUR) * HOUR_HEIGHT);
+      scrollRef.current.scrollTop = scrollTo;
+    }
+  }, [viewMode]);
+
   const today = new Date();
   const weekStart = startOfWeek(addDays(today, weekOffset * 7), { weekStartsOn: 0 });
   const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
-  // ---- MUTATIONS ----
-  const deleteBlockMutation = useMutation({ 
-    mutationFn: (blockId: string) => scheduleAPI.deleteBlock(blockId), 
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); } 
-  });
-  
-  const createBlockMutation = useMutation({ 
-    mutationFn: (block: { user_id: string; type: string; scheduled_start: string; duration_mins: number; notes?: string }) => scheduleAPI.createBlock(block), 
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); } 
-  });
-  
-  const createRecurringMutation = useMutation({ 
-    mutationFn: (data: { user_id: string; type: string; days: string[]; start_time: string; end_time: string; notes?: string }) => scheduleAPI.createRecurringBlock(data), 
-    onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); alert('✅ ' + data.message); }, 
-    onError: (error: any) => { alert('❌ ' + (error.response?.data?.message || 'Failed to create blocks')); } 
-  });
-  
-  const updateBlockMutation = useMutation({ 
-    mutationFn: ({ blockId, updates }: { blockId: string; updates: { scheduled_start?: string; duration_mins?: number; notes?: string } }) => 
-      scheduleAPI.updateBlock(blockId, updates), 
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); setEditingBlock(null); } 
-  });
-  
-  const updateFutureMutation = useMutation({ 
-    mutationFn: ({ blockId, scheduled_start, applyToFuture }: { blockId: string; scheduled_start: string; applyToFuture: boolean }) => 
-      scheduleAPI.updateBlockWithFuture(blockId, scheduled_start, applyToFuture), 
-    onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); if (data.updatedCount > 1) alert('✅ Updated ' + data.updatedCount + ' sessions'); } 
-  });
-  
-  const completeWithNotesMutation = useMutation({ 
-    mutationFn: async ({ blockId, notes }: { blockId: string; notes: string }) => scheduleAPI.completeBlockWithNotes(blockId, notes), 
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); setBlockToComplete(null); } 
-  });
-  
-  const pushToNextWeekMutation = useMutation({ 
-    mutationFn: async (blockId: string) => { 
-      const response = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001') + '/api/schedule/' + blockId + '/push-to-next-week', { method: 'PATCH', headers: { 'Content-Type': 'application/json' } }); 
-      if (!response.ok) throw new Error('Failed'); 
-      return response.json(); 
-    }, 
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); } 
-  });
-  
-  const skipBlockMutation = useMutation({ 
-    mutationFn: async (blockId: string) => { 
-      const response = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001') + '/api/schedule/' + blockId + '/skip', { method: 'PATCH', headers: { 'Content-Type': 'application/json' } }); 
-      if (!response.ok) throw new Error('Failed'); 
-      return response.json(); 
-    }, 
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); } 
-  });
-  
-  const completeEarlyMutation = useMutation({ 
-    mutationFn: async (blockId: string) => { 
-      const response = await fetch((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001') + '/api/schedule/' + blockId + '/complete-early', { method: 'PATCH', headers: { 'Content-Type': 'application/json' } }); 
-      if (!response.ok) throw new Error('Failed'); 
-      return response.json(); 
-    }, 
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); queryClient.invalidateQueries({ queryKey: ['goals'] }); onBlockUpdate?.(); } 
-  });
+  // Mutations
+  const deleteBlockMutation = useMutation({ mutationFn: (blockId: string) => scheduleAPI.deleteBlock(blockId), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); } });
+  const createRecurringMutation = useMutation({ mutationFn: (data: { user_id: string; type: string; days: string[]; start_time: string; end_time: string; notes?: string }) => scheduleAPI.createRecurringBlock(data), onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); alert('✅ ' + data.message); }, onError: (error: Error & { response?: { data?: { message?: string } } }) => { alert('❌ ' + (error.response?.data?.message || 'Failed to create blocks')); } });
+  const completeWithNotesMutation = useMutation({ mutationFn: async ({ blockId, notes }: { blockId: string; notes: string }) => scheduleAPI.completeBlockWithNotes(blockId, notes), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); setBlockToComplete(null); } });
 
-  // ---- HANDLERS ----
-  const handleConfirmMove = (applyToFuture: boolean) => { 
-    if (!pendingMove) return; 
-    if (applyToFuture) {
-      updateFutureMutation.mutate({ blockId: pendingMove.block.id, scheduled_start: pendingMove.newStart, applyToFuture: true }); 
-    } else {
-      updateBlockMutation.mutate({ blockId: pendingMove.block.id, updates: { scheduled_start: pendingMove.newStart } }); 
+  const handleCompleteClick = (blockId: string) => { const block = blocks.find(b => b.id === blockId); if (block) { setSelectedBlock(null); setBlockToComplete(block); } };
+  const handleQuickComplete = (block: ScheduleBlock) => { setBlockToComplete(block); };
+
+  // ============================================================
+  // TEMPLATE WEEK VIEW - Group blocks by day-of-week and dedupe
+  // ============================================================
+  const templateBlocksByDay = useMemo(() => {
+    const grouped: Record<number, TemplateBlock[]> = {};
+    for (let i = 0; i < 7; i++) grouped[i] = [];
+    
+    // Group ALL training blocks by day-of-week
+    const byDayOfWeek: Record<number, ScheduleBlock[]> = {};
+    for (let i = 0; i < 7; i++) byDayOfWeek[i] = [];
+    
+    blocks.forEach((block) => {
+      // Only include training/workout blocks in template view
+      if (block.type !== 'workout' && block.type !== 'training') return;
+      if (block.status === 'completed' || block.status === 'skipped') return;
+      
+      const blockDate = parseISO(block.scheduled_start);
+      const dayOfWeek = blockDate.getDay(); // 0=Sun, 1=Mon, etc.
+      byDayOfWeek[dayOfWeek].push(block);
+    });
+    
+    // For each day, dedupe by time slot (keep first occurrence of each time)
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+      const dayBlocks = byDayOfWeek[dayIndex];
+      const seenTimes = new Map<string, TemplateBlock>();
+      
+      for (const block of dayBlocks) {
+        const blockDate = parseISO(block.scheduled_start);
+        const hour = blockDate.getHours();
+        const minute = blockDate.getMinutes();
+        const timeKey = `${hour}:${minute}`;
+        
+        if (!seenTimes.has(timeKey)) {
+          const templateBlock: TemplateBlock = {
+            id: block.id,
+            dayOfWeek: dayIndex,
+            hour,
+            minute,
+            duration_mins: block.duration_mins,
+            notes: block.notes,
+            type: block.type,
+            goal_id: block.goal_id,
+            goals: block.goals,
+            allBlockIds: [block.id],
+          };
+          seenTimes.set(timeKey, templateBlock);
+        } else {
+          // Add this block's ID to the existing template block
+          seenTimes.get(timeKey)!.allBlockIds.push(block.id);
+        }
+      }
+      
+      grouped[dayIndex] = Array.from(seenTimes.values());
     }
-    setPendingMove(null); 
-  };
-  
-  const handleCompleteClick = (blockId: string) => { 
-    const block = blocks.find(b => b.id === blockId); 
-    if (block) { setSelectedBlock(null); setBlockToComplete(block); } 
-  };
-  
-  const handleQuickComplete = (block: ScheduleBlock) => {
-    setBlockToComplete(block);
-  };
-  
-  const handleReschedule = async (blockId: string, newDateTime: string) => { 
-    await updateBlockMutation.mutateAsync({ blockId, updates: { scheduled_start: newDateTime } }); 
-  };
-  
-  const handleEditSave = (blockId: string, updates: { scheduled_start?: string; duration_mins?: number; notes?: string }) => {
-    updateBlockMutation.mutate({ blockId, updates });
-  };
+    
+    return grouped;
+  }, [blocks]);
 
-  // ---- AVAILABILITY BLOCKS ----
+  // Availability blocks for background
   const availabilityBlocks = useMemo(() => {
     if (!availability) return [];
     const result: Array<{ type: string; dayIndex: number; startHour: number; startMin: number; durationMins: number; label: string }> = [];
@@ -1149,11 +1060,9 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
       
       const workSchedule = availability.work_schedule?.[day];
       if (workSchedule) {
-        const workStart = parseTime(workSchedule.start); 
-        const workEnd = parseTime(workSchedule.end);
+        const workStart = parseTime(workSchedule.start); const workEnd = parseTime(workSchedule.end);
         const workDuration = (workEnd.hours - workStart.hours) * 60 + (workEnd.minutes - workStart.minutes);
         result.push({ type: 'work', dayIndex, startHour: workStart.hours, startMin: workStart.minutes, durationMins: workDuration, label: 'Work ' + workSchedule.start + ' - ' + workSchedule.end });
-        
         const commuteMins = availability.daily_commute_mins || 0;
         if (commuteMins > 0) {
           const commuteStartMins = workStart.hours * 60 + workStart.minutes - commuteMins;
@@ -1163,110 +1072,25 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
       }
     });
     
-    (availability.fixed_commitments || []).forEach((commitment) => {
+    (availability.fixed_commitments || []).forEach((commitment) => { 
       const dayIndex = DAYS.indexOf(commitment.day.toLowerCase()); 
-      if (dayIndex === -1) return;
+      if (dayIndex === -1) return; 
       const start = parseTime(commitment.start); 
-      const end = parseTime(commitment.end);
-      result.push({ type: 'event', dayIndex, startHour: start.hours, startMin: start.minutes, durationMins: (end.hours - start.hours) * 60 + (end.minutes - start.minutes), label: commitment.name });
+      const end = parseTime(commitment.end); 
+      result.push({ type: 'event', dayIndex, startHour: start.hours, startMin: start.minutes, durationMins: (end.hours - start.hours) * 60 + (end.minutes - start.minutes), label: commitment.name }); 
     });
     return result;
   }, [availability]);
 
-  // ---- BLOCKED TIME SLOTS ----
-  const blockedTimeSlots = useMemo(() => {
-    const blocked: Record<string, string> = {};
-    availabilityBlocks.forEach((block) => { 
-      const startMins = block.startHour * 60 + block.startMin; 
-      for (let min = startMins; min < startMins + block.durationMins; min += SLOT_INTERVAL) 
-        blocked[block.dayIndex + '-' + Math.floor(min / 60) + '-' + (min % 60)] = block.type; 
-    });
-    blocks.filter((b) => isBlockerType(b.type)).forEach((block) => {
-      const blockDate = parseISO(block.scheduled_start);
-      weekDates.forEach((date, dayIndex) => { 
-        if (isSameDay(date, blockDate)) { 
-          const startMins = blockDate.getHours() * 60 + blockDate.getMinutes(); 
-          for (let min = startMins; min < startMins + block.duration_mins; min += SLOT_INTERVAL) 
-            blocked[dayIndex + '-' + Math.floor(min / 60) + '-' + (min % 60)] = block.type; 
-        } 
-      });
-    });
-    return blocked;
-  }, [availabilityBlocks, blocks, weekDates]);
-
-  const getCollisionType = useCallback((dayIndex: number, hour: number, minute: number, durationMins: number): string | null => {
-    const startMins = hour * 60 + minute;
-    for (let min = startMins; min < startMins + durationMins; min += SLOT_INTERVAL) { 
-      const key = dayIndex + '-' + Math.floor(min / 60) + '-' + (min % 60); 
-      if (blockedTimeSlots[key]) return blockedTimeSlots[key]; 
-    }
-    return null;
-  }, [blockedTimeSlots]);
-
-  const blocksByDay = useMemo(() => {
-    const grouped: Record<number, ScheduleBlock[]> = {}; 
-    for (let i = 0; i < 7; i++) grouped[i] = [];
-    blocks.forEach((block) => { 
-      const blockDate = parseISO(block.scheduled_start); 
-      weekDates.forEach((date, dayIndex) => { if (isSameDay(date, blockDate)) grouped[dayIndex].push(block); }); 
-    });
-    return grouped;
-  }, [blocks, weekDates]);
-
-  // ---- DRAG HANDLERS ----
-  const handleDragStart = (event: DragStartEvent) => { 
-    const block = event.active.data.current?.block as ScheduleBlock; 
-    if (block) setActiveBlock(block); 
-  };
-  
-  const handleDragOver = (event: DragOverEvent) => { /* simplified */ };
-  
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event; 
-    setActiveBlock(null);
-    if (!over) return;
-    const block = active.data.current?.block as ScheduleBlock;
-    const dropData = over.data.current as DroppableData;
-    if (!block || !dropData) return;
-    const collisionType = getCollisionType(dropData.dayIndex, dropData.hour, dropData.minute, block.duration_mins);
-    if (collisionType) { 
-      setOverlapWarning({ message: 'Overlaps with ' + getBlockTypeName(collisionType) + '. Choose a different time.', blockingType: collisionType, show: true }); 
-      return; 
-    }
-    const targetDate = weekDates[dropData.dayIndex];
-    setPendingMove({ block, newStart: setMinutes(setHours(targetDate, dropData.hour), dropData.minute).toISOString(), newDayIndex: dropData.dayIndex, newHour: dropData.hour, newMinute: dropData.minute });
-  };
-
-  // ---- ADD BLOCK HANDLER ----
   const handleAddBlock = (blockData: { type: string; days: string[]; start: string; end: string; notes?: string; title?: string }) => {
-    if (blockData.days.length > 1) { 
-      createRecurringMutation.mutate({ 
-        user_id: userId, 
-        type: blockData.type, 
-        days: blockData.days, 
-        start_time: blockData.start, 
-        end_time: blockData.end, 
-        notes: blockData.title || blockData.notes 
-      }); 
-    } else {
-      const dayIndex = DAYS.indexOf(blockData.days[0]); 
-      const targetDate = weekDates[dayIndex];
-      const [startH, startM] = blockData.start.split(':').map(Number); 
-      const [endH, endM] = blockData.end.split(':').map(Number);
-      const durationMins = (endH * 60 + endM) - (startH * 60 + startM);
-      const collisionType = getCollisionType(dayIndex, startH, startM, durationMins);
-      if (collisionType) { 
-        setOverlapWarning({ message: 'Overlaps with ' + getBlockTypeName(collisionType) + '. Choose a different time.', blockingType: collisionType, show: true }); 
-        return; 
-      }
-      createBlockMutation.mutate({ 
-        user_id: userId, 
-        type: blockData.type, 
-        scheduled_start: setMinutes(setHours(targetDate, startH), startM).toISOString(), 
-        duration_mins: durationMins, 
-        notes: blockData.title || blockData.notes 
-      });
-    }
+    createRecurringMutation.mutate({ 
+      user_id: userId, 
+      type: blockData.type, 
+      days: blockData.days, 
+      start_time: blockData.start, 
+      end_time: blockData.end, 
+      notes: blockData.title || blockData.notes 
+    });
   };
 
   const handleCellClick = (dayIndex: number, hour: number) => { 
@@ -1274,70 +1098,56 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
     setShowAddModal(true); 
   };
 
-  // ============================================================
-  // MOBILE VIEW
-  // ============================================================
+  // Count total sessions for header
+  const totalTemplateSessions = Object.values(templateBlocksByDay).reduce((sum, arr) => sum + arr.length, 0);
+
+  // Mobile view
   if (isMobile) {
     return (
       <>
         <div className="h-[calc(100vh-140px)] relative">
-          <MobileAgendaView 
-            blocks={blocks} 
-            availability={availability} 
-            userId={userId} 
-            onBlockClick={setSelectedBlock} 
-            onAddClick={() => setShowAddModal(true)} 
-            onQuickComplete={handleQuickComplete}
-            weekOffset={weekOffset} 
-            setWeekOffset={setWeekOffset} 
-          />
+          <MobileAgendaView blocks={blocks} availability={availability} userId={userId} onBlockClick={setSelectedBlock} onAddClick={() => setShowAddModal(true)} onQuickComplete={handleQuickComplete} weekOffset={weekOffset} setWeekOffset={setWeekOffset} />
         </div>
         <AddBlockModal isOpen={showAddModal} onClose={() => { setShowAddModal(false); setSelectedSlot(null); }} onAdd={handleAddBlock} selectedDay={selectedSlot?.day} selectedHour={selectedSlot?.hour} />
-        <SessionDetailModal block={selectedBlock} onClose={() => setSelectedBlock(null)} onComplete={handleCompleteClick} onDelete={(id) => deleteBlockMutation.mutate(id)} onEdit={setEditingBlock} onPushToNextWeek={async (id) => pushToNextWeekMutation.mutateAsync(id)} onSkip={async (id) => skipBlockMutation.mutateAsync(id)} onCompleteEarly={async (id) => completeEarlyMutation.mutateAsync(id)} onReschedule={handleReschedule} />
-        <EditBlockModal block={editingBlock} onClose={() => setEditingBlock(null)} onSave={handleEditSave} onDelete={(id) => deleteBlockMutation.mutate(id)} isLoading={updateBlockMutation.isPending} />
+        <SessionDetailModal block={selectedBlock} onClose={() => setSelectedBlock(null)} onComplete={handleCompleteClick} onDelete={(id) => deleteBlockMutation.mutate(id)} />
         <CompleteWithNotesModal block={blockToComplete} onClose={() => setBlockToComplete(null)} onComplete={(blockId, notes) => completeWithNotesMutation.mutate({ blockId, notes })} isLoading={completeWithNotesMutation.isPending} />
       </>
     );
   }
 
-  // ============================================================
-  // DESKTOP VIEW
-  // ============================================================
+  // Desktop Template Week View
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} onDragStart={() => {}} onDragOver={() => {}} onDragEnd={() => {}}>
       <div className="backdrop-blur-xl bg-white/70 rounded-2xl shadow-lg border border-white/80 overflow-hidden flex flex-col h-[calc(100vh-280px)]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 bg-slate-700 text-white flex-shrink-0">
-          <button onClick={() => setWeekOffset((prev) => prev - 1)} className="p-2 hover:bg-white/20 rounded-full">
-            <ChevronLeft className="w-5 h-5" />
+          <div className="flex items-center gap-3">
+            <LayoutGrid className="w-5 h-5 opacity-80" />
+            <div>
+              <h2 className="text-lg font-bold">Your Weekly Schedule</h2>
+              <p className="text-sm opacity-80">{totalTemplateSessions} sessions per week</p>
+            </div>
+          </div>
+          <button onClick={() => { setSelectedSlot(null); setShowAddModal(true); }} className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-full text-sm font-medium">
+            <Plus className="w-4 h-4" />Add Block
           </button>
-          <div className="text-center">
-            <h2 className="text-lg font-bold">{format(weekStart, 'MMMM yyyy')}</h2>
-            <p className="text-sm opacity-80">Week of {format(weekStart, 'MMM d')} - {format(addDays(weekStart, 6), 'MMM d')}</p>
-          </div>
-          <div className="flex gap-2">
-            {weekOffset !== 0 && <button onClick={() => setWeekOffset(0)} className="px-3 py-1 text-sm bg-white/20 hover:bg-white/30 rounded-full">Today</button>}
-            <button onClick={() => setWeekOffset((prev) => prev + 1)} className="p-2 hover:bg-white/20 rounded-full">
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
         </div>
 
         {/* Legend */}
         <div className="flex items-center justify-between px-4 py-2 bg-white/30 backdrop-blur-sm border-b border-white/40 flex-shrink-0">
           <div className="flex gap-4 text-xs text-slate-600">
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-slate-200/80 border border-slate-400" /><span>Work</span></div>
-            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-emerald-100/90 border border-emerald-400" /><span>Training</span></div>
-            <div className="flex items-center gap-1 ml-2 text-slate-500"><GripVertical className="w-3 h-3" /><span>Drag to move</span></div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-indigo-100/90 border border-indigo-400" /><span>Training</span></div>
           </div>
-          <button onClick={() => { setSelectedSlot(null); setShowAddModal(true); }} className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 text-white rounded-full text-sm hover:bg-slate-600">
-            <Plus className="w-4 h-4" />Add Block
-          </button>
+          <div className="text-xs text-slate-500 flex items-center gap-1">
+            <CalendarRange className="w-3.5 h-3.5" />
+            <span>Sessions repeat weekly</span>
+          </div>
         </div>
 
         {/* Calendar Grid */}
         <div className="flex-1 overflow-auto flex" ref={scrollRef}>
-          {/* Time Column */}
+          {/* Time column */}
           <div className="w-16 flex-shrink-0 border-r border-white/40 bg-white/30 backdrop-blur-sm sticky left-0 z-20">
             <div className="h-12 border-b border-white/40 bg-white/30" />
             <div className="relative" style={{ height: HOURS.length * HOUR_HEIGHT + 'px' }}>
@@ -1349,51 +1159,57 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
             </div>
           </div>
 
-          {/* Days Grid */}
+          {/* Day columns */}
           <div className="flex-1">
             <div className="flex min-w-[700px]">
-              {weekDates.map((date, dayIndex) => {
-                const isCurrentDay = isSameDay(date, today);
-                const dayBlocks = blocksByDay[dayIndex] || [];
+              {DAYS.map((dayName, dayIndex) => {
+                const dayTemplateBlocks = templateBlocksByDay[dayIndex] || [];
                 const dayAvailBlocks = availabilityBlocks.filter((b) => b.dayIndex === dayIndex);
+                const todayDayIndex = today.getDay();
+                const isCurrentDay = dayIndex === todayDayIndex;
                 
                 return (
                   <div key={dayIndex} className="flex-1 min-w-[100px] border-r border-white/40 last:border-r-0">
-                    {/* Day Header */}
-                    <div className={'h-12 px-2 py-1 border-b border-white/40 text-center sticky top-0 z-10 backdrop-blur-sm ' + (isCurrentDay ? 'bg-slate-100/80' : 'bg-white/50')}>
-                      <div className={'text-sm font-bold ' + (isCurrentDay ? 'text-slate-700' : 'text-slate-600')}>{DAY_LABELS[dayIndex]}</div>
-                      <div className={'text-xs ' + (isCurrentDay ? 'text-slate-600' : 'text-slate-400')}>{format(date, 'MMM d')}</div>
+                    {/* Day header - just day name, no dates */}
+                    <div className={`h-12 px-2 py-1 border-b border-white/40 text-center sticky top-0 z-10 backdrop-blur-sm ${isCurrentDay ? 'bg-slate-100/80' : 'bg-white/50'}`}>
+                      <div className={`text-sm font-bold ${isCurrentDay ? 'text-slate-700' : 'text-slate-600'}`}>{DAY_LABELS[dayIndex]}</div>
+                      <div className="text-xs text-slate-400">{dayTemplateBlocks.length} session{dayTemplateBlocks.length !== 1 ? 's' : ''}</div>
                     </div>
                     
-                    {/* Hours Grid */}
+                    {/* Time slots */}
                     <div className="relative" style={{ height: HOURS.length * HOUR_HEIGHT + 'px' }}>
-                      {/* Current time indicator - only on today */}
-                      {isCurrentDay && <CurrentTimeIndicator />}
-                      
+                      {/* Hour grid lines */}
                       {HOURS.map((hour, idx) => (
-                        <div key={hour} className={'absolute left-0 right-0 border-t border-white/30 ' + (idx % 2 === 0 ? 'bg-white/20' : 'bg-white/10')} style={{ top: idx * HOUR_HEIGHT + 'px', height: HOUR_HEIGHT + 'px' }}>
-                          {[0, 15, 30, 45].map((minute) => {
-                            const slotId = 'drop-' + dayIndex + '-' + hour + '-' + minute;
-                            const blockingType = blockedTimeSlots[dayIndex + '-' + hour + '-' + minute];
-                            const isBlocked = !!blockingType;
-                            return <DroppableCell key={slotId} id={slotId} dayIndex={dayIndex} hour={hour} minute={minute} date={date} isBlocked={isBlocked} onClick={() => handleCellClick(dayIndex, hour)} />;
-                          })}
+                        <div key={hour} className={`absolute left-0 right-0 border-t border-white/30 ${idx % 2 === 0 ? 'bg-white/20' : 'bg-white/10'}`} style={{ top: idx * HOUR_HEIGHT + 'px', height: HOUR_HEIGHT + 'px' }}>
+                          {[0, 15, 30, 45].map((minute) => (
+                            <div 
+                              key={minute}
+                              className="absolute left-0 right-0 hover:bg-white/50 cursor-pointer"
+                              style={{ top: `${(minute / 60) * HOUR_HEIGHT}px`, height: `${(SLOT_INTERVAL / 60) * HOUR_HEIGHT}px` }}
+                              onClick={() => handleCellClick(dayIndex, hour)}
+                            />
+                          ))}
                         </div>
                       ))}
                       
-                      {/* Availability blocks */}
+                      {/* Availability blocks (work, sleep, etc) */}
                       {dayAvailBlocks.map((block, idx) => (
-                        <AvailabilityBlock key={'avail-' + idx} block={block} />
+                        <AvailabilityBlock key={`avail-${idx}`} block={block} />
                       ))}
                       
-                      {/* Schedule blocks */}
-                      {dayBlocks.map((block) => {
-                        const blockStart = parseISO(block.scheduled_start);
-                        const startHour = blockStart.getHours();
-                        const startMin = blockStart.getMinutes();
-                        const top = (startHour - START_HOUR) * HOUR_HEIGHT + (startMin / 60) * HOUR_HEIGHT;
+                      {/* Template training blocks */}
+                      {dayTemplateBlocks.map((block) => {
+                        const top = (block.hour - START_HOUR) * HOUR_HEIGHT + (block.minute / 60) * HOUR_HEIGHT;
                         const height = (block.duration_mins / 60) * HOUR_HEIGHT;
-                        return <DraggableBlock key={block.id} block={block} top={top} height={height} onComplete={handleCompleteClick} onDelete={(id) => { if (window.confirm('Delete this block?')) deleteBlockMutation.mutate(id); }} onClick={(block) => setSelectedBlock(block)} />;
+                        return (
+                          <TemplateBlockComponent 
+                            key={block.id} 
+                            block={block} 
+                            top={top} 
+                            height={height} 
+                            onClick={(b) => setSelectedTemplateBlock(b)}
+                          />
+                        );
                       })}
                     </div>
                   </div>
@@ -1405,10 +1221,9 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
 
         {/* Modals */}
         <AddBlockModal isOpen={showAddModal} onClose={() => { setShowAddModal(false); setSelectedSlot(null); }} onAdd={handleAddBlock} selectedDay={selectedSlot?.day} selectedHour={selectedSlot?.hour} />
-        <SessionDetailModal block={selectedBlock} onClose={() => setSelectedBlock(null)} onComplete={handleCompleteClick} onDelete={(id) => deleteBlockMutation.mutate(id)} onEdit={setEditingBlock} onPushToNextWeek={async (id) => pushToNextWeekMutation.mutateAsync(id)} onSkip={async (id) => skipBlockMutation.mutateAsync(id)} onCompleteEarly={async (id) => completeEarlyMutation.mutateAsync(id)} onReschedule={handleReschedule} />
-        <EditBlockModal block={editingBlock} onClose={() => setEditingBlock(null)} onSave={handleEditSave} onDelete={(id) => deleteBlockMutation.mutate(id)} isLoading={updateBlockMutation.isPending} />
+        <TemplateDetailModal block={selectedTemplateBlock} onClose={() => setSelectedTemplateBlock(null)} />
+        <SessionDetailModal block={selectedBlock} onClose={() => setSelectedBlock(null)} onComplete={handleCompleteClick} onDelete={(id) => deleteBlockMutation.mutate(id)} />
         <CompleteWithNotesModal block={blockToComplete} onClose={() => setBlockToComplete(null)} onComplete={(blockId, notes) => completeWithNotesMutation.mutate({ blockId, notes })} isLoading={completeWithNotesMutation.isPending} />
-        <ApplyToFutureModal pendingMove={pendingMove} onConfirm={handleConfirmMove} onCancel={() => setPendingMove(null)} isLoading={updateFutureMutation.isPending || updateBlockMutation.isPending} />
       </div>
 
       <DragOverlay dropAnimation={null}>{activeBlock ? <DragOverlayBlock block={activeBlock} /> : null}</DragOverlay>

@@ -2792,6 +2792,232 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
+router.post('/:goalId/create-plan-with-milestones', async (req: Request, res: Response) => {
+  try {
+    const { goalId } = req.params;
+    const { milestones, weekly_hours, sessions_per_week, session_length_mins, total_hours, plan_edits, placed_sessions, preview } = req.body;
+
+    console.log(`📋 Creating plan for goal ${goalId}: ${weekly_hours}h/week, ${sessions_per_week} sessions`);
+
+    const { data: goal, error: goalError } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('id', goalId)
+      .single();
+
+    if (goalError) throw goalError;
+    if (!goal) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+
+    const baseWeekly = Number(weekly_hours) || 5;
+    const baseTotal = Number(total_hours) || 50;
+    const baseSessions = Math.min(Number(sessions_per_week) || 3, 7);
+    const baseSessionLength = Number(session_length_mins) || 60;
+    const totalWeeks = Math.max(1, Math.ceil(baseTotal / baseWeekly));
+    const safeMilestones: any[] = Array.isArray(milestones) ? milestones : [];
+
+    console.log(`📊 Plan: ${totalWeeks} weeks, ${baseSessions} sessions/week @ ${baseSessionLength}min`);
+
+    const plan: any = {
+      weekly_hours: baseWeekly,
+      sessions_per_week: baseSessions,
+      session_length_mins: baseSessionLength,
+      total_estimated_hours: baseTotal,
+      total_weeks: totalWeeks,
+      micro_goals: safeMilestones,
+      created_at: new Date().toISOString(),
+      custom: true,
+    };
+
+    // ALWAYS use AI to generate unique sessions for EVERY week
+    console.log('🤖 Generating full AI plan with unique sessions for each week...');
+    
+    try {
+      const fullPlan = await generateFullWeeklyPlan(
+        goal.name,
+        goal.category || 'skill',
+        baseSessions,
+        baseWeekly,
+        totalWeeks,
+        safeMilestones,
+        plan_edits
+      );
+      
+      // Convert to expected format
+      const allWeeks = fullPlan.weeks.map((week: any) => ({
+        week: week.week_number,
+        week_number: week.week_number,
+        focus: week.focus,
+        phase: week.week_number <= Math.ceil(totalWeeks * 0.3) ? 'foundation' 
+             : week.week_number <= Math.ceil(totalWeeks * 0.7) ? 'development' 
+             : 'peak',
+        sessions: (week.sessions || []).map((s: any) => ({
+          name: s.name,
+          description: s.description,
+          duration_mins: s.duration_mins || baseSessionLength,
+          notes: s.notes || '',
+          tip: s.notes || '',
+        })),
+      }));
+      
+      plan.weekly_plan = {
+        summary: fullPlan.summary,
+        realism_notes: fullPlan.realism_notes,
+        weeks: allWeeks,
+        milestones: fullPlan.milestones || safeMilestones,
+      };
+      
+      console.log(`✅ AI generated ${allWeeks.length} unique weeks`);
+      
+    } catch (aiError: any) {
+      console.error('⚠️ AI plan generation failed, using fallback:', aiError.message);
+      
+      // Fallback: use preview if available, otherwise simple fallback
+      const midWeekNum = Math.ceil(totalWeeks / 2);
+      const hasValidPreview = preview?.week1?.sessions?.length > 0;
+      
+      const fallbackWeeks: any[] = [];
+      for (let w = 1; w <= totalWeeks; w++) {
+        let sessions: any[];
+        let focus: string;
+        
+        if (hasValidPreview) {
+          // Use preview but try to vary it
+          const baseWeek = w <= midWeekNum ? preview.week1 : preview.midWeek;
+          if (w === totalWeeks && preview.finalWeek) {
+            sessions = preview.finalWeek.sessions;
+            focus = preview.finalWeek.focus;
+          } else {
+            sessions = baseWeek?.sessions || [];
+            focus = baseWeek?.focus || `Week ${w}`;
+          }
+        } else {
+          sessions = Array.from({ length: baseSessions }, (_, i) => ({
+            name: `${goal.name} - Week ${w} Session ${i + 1}`,
+            description: `Training session for week ${w}`,
+            duration_mins: baseSessionLength,
+            notes: 'Focus on progress',
+          }));
+          focus = `Week ${w} Training`;
+        }
+        
+        fallbackWeeks.push({
+          week: w,
+          week_number: w,
+          focus,
+          phase: w <= Math.ceil(totalWeeks * 0.3) ? 'foundation' : w <= Math.ceil(totalWeeks * 0.7) ? 'development' : 'peak',
+          sessions: sessions.map((s: any) => ({
+            name: s.name,
+            description: s.description,
+            duration_mins: s.duration_mins || baseSessionLength,
+            notes: s.notes || s.tip || '',
+            tip: s.notes || s.tip || '',
+          })),
+        });
+      }
+      
+      plan.weekly_plan = {
+        summary: `${totalWeeks}-week plan for ${goal.name}`,
+        weeks: fallbackWeeks,
+        milestones: safeMilestones,
+      };
+      
+      console.log(`⚠️ Fallback generated ${fallbackWeeks.length} weeks`);
+    }
+
+    const { error: updateError } = await supabase
+      .from('goals')
+      .update({ plan })
+      .eq('id', goalId);
+
+    if (updateError) throw updateError;
+
+    const microGoalsToInsert = safeMilestones.map((mg: any, index: number) => ({
+      goal_id: goalId,
+      name: mg.name || `Milestone ${index + 1}`,
+      order_index: index + 1,
+      completion_criteria: {
+        type: 'performance',
+        description: mg.criteria || 'Complete milestone',
+        hours_required: Number(mg.hours) || 0,
+        target_week: mg.week || mg.target_week || null,
+      },
+    }));
+
+    if (microGoalsToInsert.length > 0) {
+      await supabase.from('micro_goals').insert(microGoalsToInsert);
+    }
+
+    const progress = {
+      percent_complete: 0,
+      completed_micro_goals: 0,
+      total_micro_goals: microGoalsToInsert.length,
+      last_updated: new Date().toISOString(),
+    };
+
+    await supabase.from('goals').update({ progress }).eq('id', goalId);
+
+    console.log(`✅ Created plan: ${baseWeekly}h/week, ${baseSessions} sessions, ${totalWeeks} weeks`);
+
+    const { data: updatedGoal } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('id', goalId)
+      .single();
+
+    if (updatedGoal) {
+      try {
+        const apiUrl = process.env.API_URL || 'http://localhost:8080';
+        
+        let enrichedPlacedSessions = placed_sessions;
+        if (placed_sessions && placed_sessions.length > 0 && plan.weekly_plan?.weeks?.length > 0) {
+          const firstWeekSessions = plan.weekly_plan.weeks[0]?.sessions || [];
+          enrichedPlacedSessions = placed_sessions.map((placement: any, index: number) => {
+            const sessionContent = firstWeekSessions[index % firstWeekSessions.length];
+            return {
+              ...placement,
+              name: sessionContent?.name || `${goal.name} Session ${index + 1}`,
+              description: sessionContent?.description || 'Training session',
+              tip: sessionContent?.tip || sessionContent?.notes || '',
+            };
+          });
+        }
+        
+        const scheduleResponse = await axios.post(
+          `${apiUrl}/api/schedule/generate-for-goal`,
+          {
+            user_id: goal.user_id,
+            goal_id: goalId,
+            placed_sessions: enrichedPlacedSessions,
+            weekly_plan: plan.weekly_plan,
+          }
+        );
+
+        const scheduleResult = scheduleResponse.data;
+        console.log(`📅 Generated schedule: ${scheduleResult.blocksCreated || 0} blocks`);
+        
+        return res.json({
+          success: true,
+          plan,
+          schedule: scheduleResult,
+          message: `Plan created with ${scheduleResult.blocksCreated || 0} sessions scheduled!`,
+        });
+      } catch (scheduleErr: any) {
+        console.error('⚠️ Schedule generation failed:', scheduleErr.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      plan,
+      message: `Plan created: ${baseWeekly}h/week for ${totalWeeks} weeks`,
+    });
+  } catch (error: any) {
+    console.error('❌ Plan creation error:', error);
+    return res.status(500).json({ error: 'Failed to create plan', message: error.message });
+  }
+});
 
 
 // ============================================================
@@ -2960,57 +3186,9 @@ router.post('/:goalId/create-plan-with-milestones', async (req: Request, res: Re
         await supabase.from('micro_goals').insert(microGoalsToInsert);
       }
 
-// ============================================================
-// PASTE THIS CODE in backend/routes/goals.ts
-// Inside the "if (simple_sessions === true)" block
-// REPLACE the line: if (placed_sessions && placed_sessions.length > 0) {
-// WITH all of this code:
-// ============================================================
-
-      // ============================================================
-      // AUTO-GENERATE PLACED SESSIONS IF NOT PROVIDED
-      // ============================================================
-      let effectivePlacedSessions = placed_sessions;
-      
-      if (!effectivePlacedSessions || effectivePlacedSessions.length === 0) {
-        console.log('⚡ No placed_sessions provided, auto-generating schedule...');
-        
-        // Use preferred days or default to weekdays spread
-        const allDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-        const daysToUse = preferred_days?.length > 0 
-          ? preferred_days 
-          : allDays.slice(0, Math.min(baseSessions, 5)); // Use up to 5 weekdays by default
-        
-        // Map preferred_time to hour
-        const hourMap: Record<string, number> = {
-          morning: 9,
-          afternoon: 14,
-          evening: 18,
-          any: 10,
-        };
-        const baseHour = hourMap[preferred_time || 'any'] || 10;
-        
-        // Generate sessions distributed across preferred days
-        effectivePlacedSessions = [];
-        let sessionNum = 0;
-        
-        while (effectivePlacedSessions.length < totalSessionCount) {
-          const dayIndex = sessionNum % daysToUse.length;
-          effectivePlacedSessions.push({
-            day: daysToUse[dayIndex],
-            hour: baseHour,
-            minute: 0,
-            duration_mins: baseSessionLength,
-          });
-          sessionNum++;
-        }
-        
-        console.log(`✅ Auto-generated ${effectivePlacedSessions.length} placed sessions across days: ${[...new Set(effectivePlacedSessions.map((s: any) => s.day))].join(', ')}`);
-      }
-
-      // Generate schedule blocks from placed_sessions (or auto-generated)
-      if (effectivePlacedSessions && effectivePlacedSessions.length > 0) {
-        console.log(`📅 Generating ${totalSessionCount} schedule blocks from ${effectivePlacedSessions.length} placed sessions`);
+      // Generate schedule blocks from placed_sessions
+      if (placed_sessions && placed_sessions.length > 0) {
+        console.log(`📅 Generating ${totalSessionCount} schedule blocks from ${placed_sessions.length} placed sessions`);
         
         const dayMap: Record<string, number> = {
           'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3,
@@ -3018,7 +3196,7 @@ router.post('/:goalId/create-plan-with-milestones', async (req: Request, res: Re
         };
         
         // Sort placed sessions by day order
-        const sortedPlacements = [...effectivePlacedSessions].sort((a: any, b: any) => 
+        const sortedPlacements = [...placed_sessions].sort((a: any, b: any) => 
           dayMap[a.day.toLowerCase()] - dayMap[b.day.toLowerCase()]
         );
         
@@ -3102,25 +3280,6 @@ router.post('/:goalId/create-plan-with-milestones', async (req: Request, res: Re
           console.log(`✅ Created ${blocks.length} schedule blocks for simple sessions`);
         }
       }
-
-// ============================================================
-// END OF FIX - The rest of the code continues unchanged
-// ============================================================
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
       // Return success
       return res.json({

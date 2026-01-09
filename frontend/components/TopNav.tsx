@@ -6,6 +6,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Home, Calendar, Target, MessageCircle, Settings, LogOut, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useNavigation } from '@/components/NavigationContext';
+import { useQuery } from '@tanstack/react-query';
+import { scheduleAPI } from '@/lib/api';
 
 const navItems = [
   { href: '/', icon: Home, label: 'Home' },
@@ -20,6 +22,21 @@ export default function TopNav() {
   const { isNavHidden } = useNavigation();
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Fetch backlog count for badge
+  const { data: backlogData } = useQuery({
+    queryKey: ['backlog-count', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return { sessions: [], count: 0 };
+      const data = await scheduleAPI.getBacklog(user.id);
+      return data;
+    },
+    enabled: !!user?.id,
+    refetchInterval: 60000, // Refresh every minute
+    staleTime: 30000,
+  });
+
+  const backlogCount = backlogData?.sessions?.length || 0;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -63,11 +80,13 @@ export default function TopNav() {
             {navItems.map((item) => {
               const isActive = item.href === '/' ? pathname === '/' : pathname?.startsWith(item.href);
               const Icon = item.icon;
+              const showBadge = item.href === '/today' && backlogCount > 0;
+              
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  className={`relative flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
                     isActive 
                       ? 'bg-purple-100 text-purple-700 font-medium' 
                       : 'text-gray-600 hover:bg-gray-100'
@@ -75,6 +94,13 @@ export default function TopNav() {
                 >
                   <Icon className="w-5 h-5" />
                   <span>{item.label}</span>
+                  
+                  {/* Backlog Badge */}
+                  {showBadge && (
+                    <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1.5 bg-amber-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-sm">
+                      {backlogCount > 9 ? '9+' : backlogCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}

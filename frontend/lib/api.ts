@@ -52,15 +52,19 @@ export interface TodayTask {
   goal_name: string;
   goal_id: string;
   category: string;
+  type?: string;
   scheduled_time: string;
   duration_mins: number;
   status: string;
   completed_at?: string;
+  started_at?: string | null;
   tracked_data?: Record<string, any>;
   notes?: string;
   previous_notes?: string;
   resource_link?: string;
   resource_link_label?: string;
+  session_number?: number;
+  total_sessions?: number;
   tracking_requirements: Array<{
     key: string;
     label: string;
@@ -90,7 +94,59 @@ export interface GoalProgress {
   status: 'on_track' | 'slightly_behind' | 'behind';
 }
 
-// 🆕 Shared preferred time type
+export interface SessionStats {
+  goal: {
+    id: string;
+    name: string;
+    category: string;
+    target_date: string;
+    original_target_date: string;
+    resource_link: string | null;
+    resource_link_label: string | null;
+  };
+  progress: {
+    completed_sessions: number;
+    total_sessions: number;
+    current_session_number: number;
+    percent_complete: number;
+    total_hours_logged: number;
+    target_hours: number;
+  };
+  timing: {
+    average_session_mins: number;
+    planned_session_mins: number;
+    sessions_per_week: number;
+  };
+  slippage: {
+    has_slipped: boolean;
+    days_slipped: number;
+    original_target_date: string;
+    current_target_date: string;
+    predicted_finish_date: string;
+  };
+  backlog: {
+    missed_sessions: number;
+    missed_session_ids: string[];
+  };
+  upcoming: {
+    next_sessions: Array<{
+      id: string;
+      scheduled_start: string;
+      name: string;
+    }>;
+    total_remaining: number;
+  };
+  session_history: Array<{
+    id: string;
+    session_name: string;
+    completed_at: string;
+    duration_mins: number;
+    actual_duration_seconds?: number;
+    notes: string;
+    tracked_data?: Record<string, any>;
+  }>;
+}
+
 export type PreferredTime = 'morning' | 'afternoon' | 'evening' | 'any';
 
 export interface Goal {
@@ -99,6 +155,7 @@ export interface Goal {
   name: string;
   category: string;
   target_date?: string;
+  original_target_date?: string;
   description?: string;
   status?: string;
   plan?: any;
@@ -110,6 +167,9 @@ export interface Goal {
   intensity?: string;
   resource_link?: string;
   resource_link_label?: string;
+  chatgpt_link?: string;
+  is_chatgpt_goal?: boolean;
+  client_request_id?: string;  // ✅ Add this line
 }
 
 export interface ScheduleBlock {
@@ -123,8 +183,35 @@ export interface ScheduleBlock {
   goal_id?: string;
   created_by?: string;
   completed_at?: string;
+  started_at?: string | null;
   original_scheduled_start?: string;
-  goals?: { name: string; category?: string; resource_link?: string; resource_link_label?: string };
+  actual_duration_seconds?: number;
+  session_number?: number;
+  goals?: { 
+    name: string; 
+    category?: string; 
+    resource_link?: string; 
+    resource_link_label?: string;
+    chatgpt_link?: string;
+    total_sessions?: number;
+  };
+}
+
+export interface BacklogSession {
+  id: string;
+  name: string;
+  goal_name: string;
+  goal_id: string;
+  category?: string;
+  session_number?: number;
+  scheduled_start: string;
+  duration_mins: number;
+  deadline: string;
+  days_until_slip: number;
+  days_overdue?: number;
+  slip_days?: number;
+  resource_link?: string | null;
+  resource_link_label?: string | null;
 }
 
 export interface UserAvailability {
@@ -138,42 +225,58 @@ export interface UserAvailability {
   preferred_workout_time: string;
   total_free_hours_per_week?: number;
   total_busy_hours_per_week?: number;
+  max_hours_per_day?: number;
 }
 
 export interface Milestone {
   name: string;
-  hours: number;
+  hours?: number;
   week?: number;
   target_week?: number;
+  criteria?: string;
 }
 
 export interface PlanEdits {
   editInstructions: string;
 }
 
-// 🆕 Placed session from schedule picker
 export interface PlacedSession {
   day: string;
   hour: number;
   minute: number;
   duration_mins: number;
-  session_name: string;
+  session_name?: string;
 }
 
-// 🆕 Plan payload now carries scheduling prefs AND placed_sessions
 export interface CreatePlanPayload {
   milestones: Milestone[];
   weekly_hours: number;
   sessions_per_week: number;
   total_hours: number;
-  tracking_criteria: string[];
+  tracking_criteria?: string[];
   plan_edits?: PlanEdits;
   preferred_days?: string[];
   preferred_time?: PreferredTime;
-  placed_sessions?: PlacedSession[]; // 🆕 User's exact session placements
+  placed_sessions?: PlacedSession[];
+  total_sessions?: number;
+  simple_sessions?: boolean;
+  session_length_mins?: number;
+  // Preview from landing page AI Coach flow
+  preview?: {
+    week1: {
+      week_number: number;
+      focus: string;
+      sessions: Array<{
+        name: string;
+        description: string;
+        duration_mins: number;
+        notes?: string;
+      }>;
+    };
+    locked_weeks: number;
+  };
 }
 
-// 🆕 Fit check response from /api/goals/check-fit
 export interface FitCheckResponse {
   fits: boolean;
   available_hours: number;
@@ -196,7 +299,6 @@ export interface FitCheckResponse {
   }>;
 }
 
-// 🆕 Conversation response also surfaces prefs and fit check
 export interface ConversationResponse {
   complete: boolean;
   message: string;
@@ -211,7 +313,6 @@ export interface ConversationResponse {
   preview?: any;
   preferred_days?: string[];
   preferred_time?: PreferredTime;
-  // 🆕 New fields for schedule picker flow
   show_schedule_picker?: boolean;
   fit_check?: FitCheckResponse;
 }
@@ -237,6 +338,43 @@ export interface RecurringBlockResponse {
   duration_mins: number;
   schedule_until: string;
   message: string;
+}
+
+// ============================================================
+// 🆕 NEW: Preview Types (for landing page)
+// ============================================================
+
+export interface PreviewSession {
+  name: string;
+  description: string;
+  duration_mins: number;
+  notes?: string;
+}
+
+export interface GoalPreviewResponse {
+  goal: {
+    name: string;
+    category: string;
+  };
+  plan: {
+    weekly_hours: number;
+    sessions_per_week: number;
+    session_length_mins: number;
+    total_weeks: number;
+    total_hours: number;
+  };
+  preview: {
+    week1: {
+      week_number: number;
+      focus: string;
+      sessions: PreviewSession[];
+    };
+    locked_weeks: number;
+  };
+  reasoning: {
+    session_length_reason: string;
+    hour_estimate_notes: string;
+  };
 }
 
 // ============================================================
@@ -280,7 +418,6 @@ export const goalsAPI = {
     return response.data.goals;
   },
   
-  // Supports preferred_days / preferred_time via Partial<Goal>
   createGoal: async (goal: Partial<Goal> & { user_id: string }): Promise<Goal> => {
     const response = await api.post('/api/goals', goal);
     return response.data.goal;
@@ -306,7 +443,6 @@ export const goalsAPI = {
     return response.data;
   },
   
-  // 🆕 Check if a goal's hours fit in user's schedule
   checkFit: async (
     userId: string,
     weeklyHours: number,
@@ -320,7 +456,6 @@ export const goalsAPI = {
     return response.data;
   },
   
-  // 🆕 payload now typed with scheduling prefs AND placed_sessions
   createPlanWithMilestones: async (goalId: string, payload: CreatePlanPayload): Promise<any> => {
     const response = await api.post(`/api/goals/${goalId}/create-plan-with-milestones`, payload, { timeout: 300000 });
     return response.data;
@@ -371,7 +506,6 @@ export const goalsAPI = {
     return response.data;
   },
   
-  // 🆕 allow updating preferred_time as well
   updatePreferences: async (goalId: string, data: { 
     preferred_days?: string[]; 
     preferred_time?: PreferredTime; 
@@ -382,11 +516,17 @@ export const goalsAPI = {
     return response.data;
   },
   
-  // 🆕 Update resource link for a goal
   updateResourceLink: async (goalId: string, resourceLink: string, resourceLinkLabel?: string): Promise<Goal> => {
     const response = await api.patch(`/api/goals/${goalId}/resource-link`, { 
       resource_link: resourceLink || null,
       resource_link_label: resourceLinkLabel || null
+    });
+    return response.data.goal;
+  },
+  
+  updateChatGPTLink: async (goalId: string, chatgptLink: string): Promise<Goal> => {
+    const response = await api.patch(`/api/goals/${goalId}/chatgpt-link`, { 
+      chatgpt_link: chatgptLink || null
     });
     return response.data.goal;
   },
@@ -435,6 +575,30 @@ export const goalsAPI = {
     const response = await api.get(`/api/goals/${goalId}/schedule`);
     return response.data;
   },
+  
+  parseChatGPTPlan: async (userId: string, planText: string): Promise<{
+    success: boolean;
+    sessions_per_week: number;
+    session_duration_mins: number;
+    total_sessions: number;
+    total_weeks: number;
+    session_titles?: string[];
+    message: string;
+  }> => {
+    const response = await api.post('/api/goals/parse-chatgpt-plan', {
+      user_id: userId,
+      plan_text: planText,
+    });
+    return response.data;
+  },
+
+  // ============================================================
+  // 🆕 NEW: Generate Preview (for landing page - NO AUTH REQUIRED)
+  // ============================================================
+  generatePreview: async (goalName: string): Promise<GoalPreviewResponse> => {
+    const response = await api.post('/api/goals/preview', { goal_name: goalName });
+    return response.data;
+  },
 };
 
 // ============================================================
@@ -450,6 +614,11 @@ export const scheduleAPI = {
   getToday: async (userId: string): Promise<ScheduleBlock[]> => {
     const response = await api.get('/api/schedule/today', { params: { user_id: userId } });
     return response.data.blocks;
+  },
+  
+  getBacklog: async (userId: string): Promise<{ sessions: BacklogSession[] }> => {
+    const response = await api.get('/api/schedule/backlog', { params: { user_id: userId } });
+    return response.data;
   },
   
   getBlocks: async (userId: string, startDate: string, endDate: string): Promise<{ blocks: ScheduleBlock[] }> => {
@@ -520,6 +689,11 @@ export const scheduleAPI = {
     return response.data.block;
   },
   
+  startSession: async (blockId: string): Promise<{ success: boolean; block: ScheduleBlock; message: string }> => {
+    const response = await api.patch(`/api/schedule/${blockId}/start`);
+    return response.data;
+  },
+  
   deleteBlock: async (blockId: string): Promise<void> => {
     await api.delete(`/api/schedule/${blockId}`);
   },
@@ -529,7 +703,6 @@ export const scheduleAPI = {
     return response.data;
   },
   
-  // 🆕 Now supports placed_sessions for exact scheduling
   generateForGoal: async (
     userId: string,
     goalId: string,
@@ -561,6 +734,33 @@ export const scheduleAPI = {
     return response.data;
   },
   
+  completeWithDuration: async (
+    blockId: string, 
+    data: { notes: string; duration_seconds: number }
+  ): Promise<{ success: boolean; block: ScheduleBlock; message: string }> => {
+    const response = await api.patch(`/api/schedule/${blockId}/complete-with-duration`, data);
+    return response.data;
+  },
+  
+  getSessionStats: async (goalId: string, userId: string): Promise<SessionStats> => {
+    const response = await api.get(`/api/schedule/session-stats/${goalId}`, { 
+      params: { user_id: userId } 
+    });
+    return response.data;
+  },
+  
+  completeSession: async (
+    sessionId: string, 
+    durationSeconds: number, 
+    diaryNotes: string
+  ): Promise<{ success: boolean; block: ScheduleBlock; progress: any; message: string }> => {
+    const response = await api.patch(`/api/schedule/${sessionId}/complete-session`, {
+      duration_seconds: durationSeconds,
+      diary_notes: diaryNotes,
+    });
+    return response.data;
+  },
+  
   skipBlock: async (blockId: string): Promise<{ success: boolean; deadline_impact: string | null; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/skip`);
     return response.data;
@@ -578,6 +778,25 @@ export const scheduleAPI = {
   
   completeEarly: async (blockId: string, notes: string): Promise<{ success: boolean; block: ScheduleBlock; deadline_impact: string | null; message: string }> => {
     const response = await api.patch(`/api/schedule/${blockId}/complete-early`, { notes });
+    return response.data;
+  },
+  
+  getAheadOptions: async (userId: string): Promise<{ 
+    options: Array<{
+      goal_id: string;
+      goal_name: string;
+      category: string;
+      next_session: {
+        id: string;
+        name: string;
+        session_number: number;
+        duration_mins: number;
+        scheduled_start: string;
+      };
+      time_saved: string;
+    }> 
+  }> => {
+    const response = await api.get('/api/schedule/get-ahead-options', { params: { user_id: userId } });
     return response.data;
   },
 };
@@ -609,6 +828,14 @@ export const availabilityAPI = {
   
   update: async (userId: string, availability: any): Promise<any> => {
     const response = await api.post('/api/availability', { user_id: userId, ...availability });
+    return response.data;
+  },
+  
+  updateMaxHoursPerDay: async (userId: string, maxHours: number): Promise<any> => {
+    const response = await api.patch('/api/availability/max-hours', { 
+      user_id: userId, 
+      max_hours_per_day: maxHours 
+    });
     return response.data;
   },
 };

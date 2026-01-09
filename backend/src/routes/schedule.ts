@@ -529,7 +529,7 @@ router.get('/', async (req: Request, res: Response) => {
       .select(
         `
         *,
-        goals (name, category)
+        goals (name, category, description)
       `
       )
       .eq('user_id', user_id as string);
@@ -573,7 +573,7 @@ router.get('/today', async (req: Request, res: Response) => {
       .select(
         `
         *,
-        goals (name, category)
+        goals (name, category, description)
       `
       )
       .eq('user_id', user_id as string)
@@ -594,6 +594,136 @@ router.get('/today', async (req: Request, res: Response) => {
     });
   }
 });
+
+/**
+ * GET /api/schedule/backlog
+ * Get overdue sessions that weren't completed
+ * Returns sessions with deadline info (when next session is scheduled)
+ */
+router.get('/backlog', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({
+        error: 'Missing user_id query parameter',
+      });
+    }
+
+    // Get start of today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString();
+
+    console.log(`\n📋 ========== FETCHING BACKLOG ==========`);
+    console.log(`👤 User: ${user_id}`);
+    console.log(`📅 Looking for sessions before: ${todayStr}`);
+
+    // Get all overdue sessions (scheduled before today, not completed/skipped)
+    const { data: overdueBlocks, error: overdueError } = await supabase
+      .from('schedule_blocks')
+      .select(`
+        *,
+        goals (id, name, category, plan, resource_link, resource_link_label)
+      `)
+      .eq('user_id', user_id as string)
+      .lt('scheduled_start', todayStr)
+      .eq('status', 'scheduled')
+      .in('type', ['training', 'workout'])
+      .order('scheduled_start', { ascending: true });
+
+    if (overdueError) throw overdueError;
+
+    if (!overdueBlocks || overdueBlocks.length === 0) {
+      console.log(`✅ No backlog sessions found`);
+      return res.json({
+        sessions: [],
+        count: 0,
+      });
+    }
+
+    console.log(`📦 Found ${overdueBlocks.length} overdue sessions`);
+
+    // For each overdue session, find the next scheduled session for that goal
+    // to calculate "days until slip"
+    const backlogSessions = await Promise.all(
+      overdueBlocks.map(async (block) => {
+        // Parse session name from notes
+        const notesParts = (block.notes || '').split('|||');
+        const sessionName = notesParts[0] || 'Session';
+
+        // Find next scheduled session for this goal (after today)
+        const { data: nextSession } = await supabase
+          .from('schedule_blocks')
+          .select('scheduled_start')
+          .eq('goal_id', block.goal_id)
+          .eq('status', 'scheduled')
+          .gte('scheduled_start', todayStr)
+          .order('scheduled_start', { ascending: true })
+          .limit(1)
+          .single();
+
+        // Calculate days until the next session (deadline)
+        let daysUntilSlip = 7; // Default: 7 days if no next session found
+        let deadlineDate = new Date();
+        deadlineDate.setDate(deadlineDate.getDate() + 7);
+
+        if (nextSession) {
+          const nextDate = new Date(nextSession.scheduled_start);
+          deadlineDate = nextDate;
+          const diffTime = nextDate.getTime() - today.getTime();
+          daysUntilSlip = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        }
+
+        // Calculate how many days overdue
+        const scheduledDate = new Date(block.scheduled_start);
+        const daysOverdue = Math.floor((today.getTime() - scheduledDate.getTime()) / (1000 * 60 * 60 * 24));
+
+        return {
+          id: block.id,
+          name: sessionName,
+          description: notesParts[1] || '',
+          goal_id: block.goal_id,
+          goal_name: block.goals?.name || 'Unknown Goal',
+          category: block.goals?.category || 'default',
+          duration_mins: block.duration_mins,
+          scheduled_date: block.scheduled_start,
+          days_overdue: daysOverdue,
+          deadline: deadlineDate.toISOString(),
+          days_until_slip: daysUntilSlip,
+          slip_days: block.goals?.plan?.sessions_per_week 
+            ? Math.ceil(7 / block.goals.plan.sessions_per_week)
+            : 2, // How many days goal slips if not completed
+          resource_link: block.goals?.resource_link || null,
+          resource_link_label: block.goals?.resource_link_label || null,
+        };
+      })
+    );
+
+    // Sort by urgency (days_until_slip ascending, then days_overdue descending)
+    backlogSessions.sort((a, b) => {
+      if (a.days_until_slip !== b.days_until_slip) {
+        return a.days_until_slip - b.days_until_slip;
+      }
+      return b.days_overdue - a.days_overdue;
+    });
+
+    console.log(`✅ Returning ${backlogSessions.length} backlog sessions`);
+
+    return res.json({
+      sessions: backlogSessions,
+      count: backlogSessions.length,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Backlog fetch error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch backlog',
+      message: error.message,
+    });
+  }
+});
+
 /**
  * POST /api/schedule
  * Create a new schedule block
@@ -1102,11 +1232,24 @@ async function generateFullGoalSchedule(
   const normalizedPreferredDays = preferredDays.map(d => d.toLowerCase());
   const maxSessionsPerDay = Math.max(1, Math.ceil(sessionsPerWeek / normalizedPreferredDays.length));
   console.log(`📊 Max ${maxSessionsPerDay} sessions per day (${sessionsPerWeek} sessions / ${normalizedPreferredDays.length} days)`);
+  
 
   for (let weekNum = 0; weekNum < totalWeeks; weekNum++) {
-    const weekStart = new Date(startDate);
-    weekStart.setDate(startDate.getDate() + weekNum * 7);
+    // ✅ FIX: Align to actual calendar weeks (Sunday-based)
+    const todayDate = new Date(startDate);
+    const currentDayOfWeek = todayDate.getDay(); // 0=Sunday
+    
+    // Calculate Sunday of current week
+    const currentWeekSunday = new Date(todayDate);
+    currentWeekSunday.setDate(todayDate.getDate() - currentDayOfWeek);
+    currentWeekSunday.setHours(0, 0, 0, 0);
+    
+    // weekStart = Sunday of week N
+    const weekStart = new Date(currentWeekSunday);
+    weekStart.setDate(currentWeekSunday.getDate() + weekNum * 7);
+    
     let weekSessions: any[] = [];
+
     
     if (weeklyPlan?.weeks && weeklyPlan.weeks[weekNum]) {
       weekSessions = weeklyPlan.weeks[weekNum].sessions || [];
@@ -1590,51 +1733,652 @@ router.post('/auto-generate', async (req: Request, res: Response) => {
   }
 });
 // ============================================================
-// NEW ENDPOINTS - Complete with notes, Skip, Smart Reschedule
+// SESSION MANAGEMENT ENDPOINTS - Start, Complete, Skip, Reschedule
 // ============================================================
+//DOMOTE
 /**
- * PATCH /api/schedule/:id/complete-with-notes
- * Complete a block with just notes (simplified - no metrics)
+ * PATCH /api/schedule/:id/start
+ * Start a session - sets started_at timestamp for stopwatch functionality
+ * Used by Today page when user clicks "Start" button
  */
-router.patch('/:id/complete-with-notes', async (req: Request, res: Response) => {
+router.patch('/:id/start', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { notes } = req.body;
-    console.log(`✅ Completing block ${id} with notes`);
+    
+    console.log(`▶️ Starting session: ${id}`);
+    
     const { data: block, error } = await supabase
       .from('schedule_blocks')
       .update({
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-        notes: notes || null,
+        started_at: new Date().toISOString(),
+        status: 'in_progress',
       })
       .eq('id', id)
       .select(`
         *,
-        goals (id, name, category, plan, target_date)
+        goals (name, category)
       `)
       .single();
+
     if (error) throw error;
-    let progressMessage = null;
-    if (block.goal_id) {
-      const progress = await calculateGoalProgress(block.goal_id);
-      if (progress) {
-        progressMessage = progress.message;
-      }
-    }
+
+    console.log(`✅ Session started: ${id}`);
+    
     return res.json({
       success: true,
       block,
-      message: progressMessage || 'Session logged!',
+      started_at: block.started_at,
+      message: 'Session started',
     });
   } catch (error: any) {
-    console.error('❌ Complete with notes error:', error);
+    console.error('❌ Start session error:', error);
     return res.status(500).json({
-      error: 'Failed to complete block',
+      error: 'Failed to start session',
       message: error.message,
     });
   }
 });
+
+
+// ============================================================
+// 🆕 NEW ROUTES FOR ACTIVE SESSION VIEW
+// Add these AFTER the /:id/complete-with-notes route
+// Add these BEFORE the /:id/skip route
+// ============================================================
+
+/**
+ * GET /api/schedule/session-stats/:goalId
+ * Get comprehensive stats for active session view
+ * Includes: progress, slippage, average time, session history
+ */
+router.get('/session-stats/:goalId', async (req: Request, res: Response) => {
+  try {
+    const { goalId } = req.params;
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'Missing user_id' });
+    }
+
+    console.log(`📊 Fetching session stats for goal ${goalId}`);
+
+    // Get goal details
+    const { data: goal, error: goalError } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('id', goalId)
+      .single();
+
+    if (goalError || !goal) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+
+    // Get all sessions for this goal
+    const { data: allSessions, error: sessionsError } = await supabase
+      .from('schedule_blocks')
+      .select('*')
+      .eq('goal_id', goalId)
+      .order('scheduled_start', { ascending: true });
+
+    if (sessionsError) throw sessionsError;
+
+    const sessions = allSessions || [];
+    const now = new Date();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Calculate stats
+    const completedSessions = sessions.filter(s => s.status === 'completed');
+    const missedSessions = sessions.filter(s => 
+      s.status === 'scheduled' && new Date(s.scheduled_start) < today
+    );
+    const upcomingSessions = sessions.filter(s => 
+      s.status === 'scheduled' && new Date(s.scheduled_start) >= today
+    );
+    const totalSessions = sessions.length;
+
+    // Calculate average session time (from completed sessions)
+    let averageSessionMins = goal.plan?.session_length_mins || 60;
+    if (completedSessions.length > 0) {
+      const totalMins = completedSessions.reduce((sum, s) => {
+        // Use actual_duration_seconds if available, else duration_mins
+        if (s.actual_duration_seconds) {
+          return sum + (s.actual_duration_seconds / 60);
+        }
+        return sum + (s.duration_mins || 0);
+      }, 0);
+      averageSessionMins = Math.round(totalMins / completedSessions.length);
+    }
+
+    // Calculate total hours logged
+    const totalHoursLogged = completedSessions.reduce((sum, s) => {
+      if (s.actual_duration_seconds) {
+        return sum + (s.actual_duration_seconds / 3600);
+      }
+      return sum + ((s.duration_mins || 0) / 60);
+    }, 0);
+
+    // Calculate slippage (compare original target to current)
+    const originalTargetDate = goal.original_target_date || goal.target_date;
+    const currentTargetDate = goal.target_date;
+    let slippageDays = 0;
+    let hasSlipped = false;
+
+    if (originalTargetDate && currentTargetDate) {
+      const original = new Date(originalTargetDate);
+      const current = new Date(currentTargetDate);
+      slippageDays = Math.round((current.getTime() - original.getTime()) / (1000 * 60 * 60 * 24));
+      hasSlipped = slippageDays > 0;
+    }
+
+    // Calculate predicted finish date based on current pace
+    let predictedFinishDate = currentTargetDate;
+    if (missedSessions.length > 0 && goal.plan?.sessions_per_week) {
+      // Each missed session pushes finish by (7 / sessions_per_week) days
+      const daysPerSession = 7 / goal.plan.sessions_per_week;
+      const additionalDays = Math.ceil(missedSessions.length * daysPerSession);
+      const predicted = new Date(currentTargetDate);
+      predicted.setDate(predicted.getDate() + additionalDays);
+      predictedFinishDate = predicted.toISOString().split('T')[0];
+    }
+
+    // Get session history with notes (for logbook)
+    const sessionHistory = completedSessions.map(s => {
+      const notesParts = (s.notes || '').split('|||');
+      const userNotes = notesParts[3] || ''; // User completion notes are 4th part
+      
+      return {
+        id: s.id,
+        session_name: notesParts[0] || 'Session',
+        description: notesParts[1] || '',
+        scheduled_date: s.scheduled_start,
+        completed_at: s.completed_at,
+        duration_mins: s.duration_mins,
+        actual_duration_seconds: s.actual_duration_seconds,
+        notes: userNotes,
+        tracked_data: s.tracked_data,
+      };
+    }).sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime());
+
+    // Progress calculation
+    const progressPercent = totalSessions > 0 
+      ? Math.round((completedSessions.length / totalSessions) * 100)
+      : 0;
+
+    // Get current session number
+    const currentSessionNumber = completedSessions.length + 1;
+
+    return res.json({
+      goal: {
+        id: goal.id,
+        name: goal.name,
+        category: goal.category,
+        target_date: currentTargetDate,
+        original_target_date: originalTargetDate,
+        resource_link: goal.resource_link,
+        resource_link_label: goal.resource_link_label,
+      },
+      progress: {
+        completed_sessions: completedSessions.length,
+        total_sessions: totalSessions,
+        current_session_number: currentSessionNumber,
+        percent_complete: progressPercent,
+        total_hours_logged: Math.round(totalHoursLogged * 10) / 10,
+        target_hours: goal.plan?.total_estimated_hours || 0,
+      },
+      timing: {
+        average_session_mins: averageSessionMins,
+        planned_session_mins: goal.plan?.session_length_mins || 60,
+        sessions_per_week: goal.plan?.sessions_per_week || 3,
+      },
+      slippage: {
+        has_slipped: hasSlipped,
+        days_slipped: slippageDays,
+        original_target_date: originalTargetDate,
+        current_target_date: currentTargetDate,
+        predicted_finish_date: predictedFinishDate,
+      },
+      backlog: {
+        missed_sessions: missedSessions.length,
+        missed_session_ids: missedSessions.map(s => s.id),
+      },
+      upcoming: {
+        next_sessions: upcomingSessions.slice(0, 5).map(s => ({
+          id: s.id,
+          scheduled_start: s.scheduled_start,
+          name: (s.notes || '').split('|||')[0] || 'Session',
+        })),
+        total_remaining: upcomingSessions.length,
+      },
+      session_history: sessionHistory,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Session stats error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch session stats',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * PATCH /api/schedule/:id/complete-session
+ * Complete a session with duration and diary notes
+ * Used by the new Active Session View
+ */
+router.patch('/:id/complete-session', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { duration_seconds, diary_notes } = req.body;
+
+    console.log(`✅ Completing session ${id} with diary notes`);
+
+    // Get the current block
+    const { data: block, error: fetchError } = await supabase
+      .from('schedule_blocks')
+      .select(`
+        *,
+        goals (id, name, category, target_date, original_target_date, plan)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !block) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Build update object
+    const updateData: any = {
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      started_at: block.started_at || new Date().toISOString(),
+    };
+
+    // Store actual duration if provided
+    if (duration_seconds) {
+      updateData.actual_duration_seconds = duration_seconds;
+    }
+
+    // Append diary notes to existing notes (preserve session name/description)
+    if (diary_notes) {
+      const parts = (block.notes || '|||').split('|||');
+      // Ensure we have at least 4 parts: name, description, tip, diary
+      while (parts.length < 4) parts.push('');
+      parts[3] = diary_notes; // Diary notes as 4th part
+      updateData.notes = parts.join('|||');
+    }
+
+    // Update the block
+    const { data: updatedBlock, error: updateError } = await supabase
+      .from('schedule_blocks')
+      .update(updateData)
+      .eq('id', id)
+      .select(`
+        *,
+        goals (id, name, category, target_date, plan)
+      `)
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Calculate updated progress
+    let progressMessage = '🎉 Session completed!';
+    let updatedStats = null;
+
+    if (block.goal_id) {
+      // Get updated stats
+      const { data: completedBlocks } = await supabase
+        .from('schedule_blocks')
+        .select('id')
+        .eq('goal_id', block.goal_id)
+        .eq('status', 'completed');
+
+      const { data: totalBlocks } = await supabase
+        .from('schedule_blocks')
+        .select('id')
+        .eq('goal_id', block.goal_id);
+
+      const completed = completedBlocks?.length || 0;
+      const total = totalBlocks?.length || 0;
+      const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+      updatedStats = {
+        completed_sessions: completed,
+        total_sessions: total,
+        percent_complete: percent,
+      };
+
+      if (percent === 100) {
+        progressMessage = '🏆 Goal complete! Amazing work!';
+      } else if (percent >= 75) {
+        progressMessage = `🔥 ${percent}% done - almost there!`;
+      } else if (percent >= 50) {
+        progressMessage = `💪 ${percent}% complete - halfway!`;
+      } else {
+        progressMessage = `✅ Session logged - ${percent}% complete`;
+      }
+    }
+
+    return res.json({
+      success: true,
+      block: updatedBlock,
+      progress: updatedStats,
+      message: progressMessage,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Complete session error:', error);
+    return res.status(500).json({
+      error: 'Failed to complete session',
+      message: error.message,
+    });
+  }
+});
+
+// ============================================================
+// END OF NEW ROUTES FOR ACTIVE SESSION VIEW
+// The existing /:id/skip route should come AFTER this
+// ============================================================
+// ============================================================
+// GET AHEAD FEATURE
+// Add this route to schedule.ts (after the session-stats routes)
+// ============================================================
+
+/**
+ * GET /api/schedule/get-ahead-options
+ * Get next available session for each goal that user can complete early
+ * Shows how many days earlier the goal would finish
+ */
+router.get('/get-ahead-options', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'Missing user_id' });
+    }
+
+    console.log(`\n🚀 ========== GET AHEAD OPTIONS ==========`);
+    console.log(`👤 User: ${user_id}`);
+
+    // Get today's date at midnight for comparison
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(today);
+    todayEnd.setHours(23, 59, 59, 999);
+
+    // Get all active goals for this user
+    const { data: goals, error: goalsError } = await supabase
+      .from('goals')
+      .select('id, name, category, target_date, plan, resource_link, resource_link_label')
+      .eq('user_id', user_id)
+      .eq('status', 'active');
+
+    if (goalsError) throw goalsError;
+
+    if (!goals || goals.length === 0) {
+      return res.json({ options: [], message: 'No active goals' });
+    }
+
+    const options: Array<{
+      goal_id: string;
+      goal_name: string;
+      category: string;
+      next_session: {
+        id: string;
+        name: string;
+        description: string;
+        session_number: number;
+        total_sessions: number;
+        duration_mins: number;
+        scheduled_start: string;
+        days_until_scheduled: number;
+      };
+      time_saved_days: number;
+      new_target_date: string;
+      resource_link: string | null;
+      resource_link_label: string | null;
+    }> = [];
+
+    for (const goal of goals) {
+      // Get the next scheduled (incomplete) session for this goal that's AFTER today
+      // (we don't want to show today's sessions as "get ahead" - those are regular tasks)
+      const { data: nextSession, error: sessionError } = await supabase
+        .from('schedule_blocks')
+        .select('*')
+        .eq('goal_id', goal.id)
+        .eq('status', 'scheduled')
+        .gt('scheduled_start', todayEnd.toISOString())
+        .order('scheduled_start', { ascending: true })
+        .limit(1)
+        .single();
+
+      if (sessionError || !nextSession) {
+        // No future sessions for this goal
+        continue;
+      }
+
+      // Get total sessions count for this goal
+      const { count: totalSessions } = await supabase
+        .from('schedule_blocks')
+        .select('id', { count: 'exact' })
+        .eq('goal_id', goal.id);
+
+      // Get completed sessions count
+      const { count: completedSessions } = await supabase
+        .from('schedule_blocks')
+        .select('id', { count: 'exact' })
+        .eq('goal_id', goal.id)
+        .eq('status', 'completed');
+
+      // Calculate session number
+      const sessionNumber = (completedSessions || 0) + 1;
+
+      // Parse session name from notes
+      const notesParts = (nextSession.notes || '').split('|||');
+      const sessionName = notesParts[0] || `Session ${sessionNumber}`;
+      const sessionDescription = notesParts[1] || '';
+
+      // Calculate days until this session is scheduled
+      const scheduledDate = new Date(nextSession.scheduled_start);
+      const daysUntilScheduled = Math.ceil(
+        (scheduledDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      // Calculate time saved (how much earlier goal would finish)
+      // This is roughly: days until scheduled session
+      const timeSavedDays = daysUntilScheduled;
+
+      // Calculate new target date if completed early
+      let newTargetDate = goal.target_date;
+      if (goal.target_date) {
+        const currentTarget = new Date(goal.target_date);
+        currentTarget.setDate(currentTarget.getDate() - timeSavedDays);
+        newTargetDate = currentTarget.toISOString().split('T')[0];
+      }
+
+      options.push({
+        goal_id: goal.id,
+        goal_name: goal.name,
+        category: goal.category,
+        next_session: {
+          id: nextSession.id,
+          name: sessionName,
+          description: sessionDescription,
+          session_number: sessionNumber,
+          total_sessions: totalSessions || 0,
+          duration_mins: nextSession.duration_mins,
+          scheduled_start: nextSession.scheduled_start,
+          days_until_scheduled: daysUntilScheduled,
+        },
+        time_saved_days: timeSavedDays,
+        new_target_date: newTargetDate,
+        resource_link: goal.resource_link,
+        resource_link_label: goal.resource_link_label,
+      });
+    }
+
+    // Sort by time saved (most impactful first)
+    options.sort((a, b) => b.time_saved_days - a.time_saved_days);
+
+    console.log(`✅ Found ${options.length} get-ahead options`);
+
+    return res.json({
+      options,
+      count: options.length,
+      message: options.length > 0 
+        ? `${options.length} sessions available to get ahead`
+        : 'All caught up! No sessions to get ahead on.',
+    });
+
+  } catch (error: any) {
+    console.error('❌ Get ahead options error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch get-ahead options',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/schedule/:id/do-ahead
+ * Complete a future session early and pull the goal deadline forward
+ */
+router.post('/:id/do-ahead', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { duration_seconds, diary_notes } = req.body;
+
+    console.log(`🚀 Doing session ${id} ahead of schedule`);
+
+    // Get the block
+    const { data: block, error: fetchError } = await supabase
+      .from('schedule_blocks')
+      .select(`
+        *,
+        goals (id, name, category, target_date, original_target_date, plan)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !block) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Calculate how many days early this is
+    const scheduledDate = new Date(block.scheduled_start);
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const daysEarly = Math.max(0, Math.ceil(
+      (scheduledDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+    ));
+
+    // Build update data
+    const updateData: any = {
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      started_at: block.started_at || new Date().toISOString(),
+    };
+
+    if (duration_seconds) {
+      updateData.actual_duration_seconds = duration_seconds;
+    }
+
+    // Append diary notes
+    if (diary_notes) {
+      const parts = (block.notes || '|||').split('|||');
+      while (parts.length < 4) parts.push('');
+      parts[3] = diary_notes;
+      updateData.notes = parts.join('|||');
+    }
+
+    // Update the block
+    const { data: updatedBlock, error: updateError } = await supabase
+      .from('schedule_blocks')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Pull the goal deadline forward
+    let deadlineUpdate = null;
+    if (block.goal_id && block.goals?.target_date && daysEarly > 0) {
+      // Store original target if not set
+      if (!block.goals.original_target_date) {
+        await supabase
+          .from('goals')
+          .update({ original_target_date: block.goals.target_date })
+          .eq('id', block.goal_id);
+      }
+
+      // Pull target forward
+      const currentTarget = new Date(block.goals.target_date);
+      currentTarget.setDate(currentTarget.getDate() - daysEarly);
+      const newTargetDate = currentTarget.toISOString().split('T')[0];
+
+      await supabase
+        .from('goals')
+        .update({ target_date: newTargetDate })
+        .eq('id', block.goal_id);
+
+      deadlineUpdate = {
+        days_saved: daysEarly,
+        old_target: block.goals.target_date,
+        new_target: newTargetDate,
+      };
+
+      console.log(`📅 Pulled deadline forward by ${daysEarly} days: ${block.goals.target_date} → ${newTargetDate}`);
+    }
+
+    // Calculate progress
+    let progress = null;
+    if (block.goal_id) {
+      const { data: completedBlocks } = await supabase
+        .from('schedule_blocks')
+        .select('id')
+        .eq('goal_id', block.goal_id)
+        .eq('status', 'completed');
+
+      const { data: totalBlocks } = await supabase
+        .from('schedule_blocks')
+        .select('id')
+        .eq('goal_id', block.goal_id);
+
+      const completed = completedBlocks?.length || 0;
+      const total = totalBlocks?.length || 0;
+
+      progress = {
+        completed_sessions: completed,
+        total_sessions: total,
+        percent_complete: total > 0 ? Math.round((completed / total) * 100) : 0,
+      };
+    }
+
+    const message = daysEarly > 0
+      ? `🚀 Amazing! Completed ${daysEarly} day${daysEarly > 1 ? 's' : ''} early! Goal deadline pulled forward.`
+      : `✅ Session completed!`;
+
+    return res.json({
+      success: true,
+      block: updatedBlock,
+      deadline_update: deadlineUpdate,
+      progress,
+      days_early: daysEarly,
+      message,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Do ahead error:', error);
+    return res.status(500).json({
+      error: 'Failed to complete session early',
+      message: error.message,
+    });
+  }
+});
+
+
 /**
  * PATCH /api/schedule/:id/skip
  * Skip a block - marks as skipped, calculates deadline impact
@@ -1695,6 +2439,7 @@ router.patch('/:id/skip', async (req: Request, res: Response) => {
     });
   }
 });
+
 /**
  * PATCH /api/schedule/:id/reschedule-smart
  * Smart reschedule - later today, tomorrow, or custom time
@@ -1762,6 +2507,7 @@ router.patch('/:id/reschedule-smart', async (req: Request, res: Response) => {
     });
   }
 });
+
 /**
  * PATCH /api/schedule/:id/push-to-next-week
  * Push a session to next week - affects goal deadline
@@ -1837,6 +2583,7 @@ router.patch('/:id/push-to-next-week', async (req: Request, res: Response) => {
     });
   }
 });
+
 /**
  * PATCH /api/schedule/:id/complete-early
  * Complete a future session early - can pull deadline forward
@@ -1915,9 +2662,11 @@ router.patch('/:id/complete-early', async (req: Request, res: Response) => {
     });
   }
 });
+
 // ============================================================
 // EXISTING ENDPOINTS (unchanged)
 // ============================================================
+
 /**
  * PATCH /api/schedule/:id
  * Update a schedule block (for drag-and-drop)
@@ -1955,6 +2704,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
     });
   }
 });
+
 /**
  * PATCH /api/schedule/:id/with-future
  * Update a schedule block and optionally apply the same time change to all future matching sessions
@@ -2047,6 +2797,7 @@ router.patch('/:id/with-future', async (req: Request, res: Response) => {
     });
   }
 });
+
 /**
  * PATCH /api/schedule/:id/reschedule
  * Reschedule a block (legacy endpoint)
@@ -2074,6 +2825,7 @@ router.patch('/:id/reschedule', async (req: Request, res: Response) => {
     });
   }
 });
+
 /**
  * DELETE /api/schedule/:id
  * Delete a schedule block
@@ -2095,6 +2847,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
     });
   }
 });
+
 /**
  * PATCH /api/schedule/:id/complete
  * Mark a block as completed (legacy - no notes)
@@ -2125,4 +2878,5 @@ router.patch('/:id/complete', async (req: Request, res: Response) => {
     });
   }
 });
+
 export default router;

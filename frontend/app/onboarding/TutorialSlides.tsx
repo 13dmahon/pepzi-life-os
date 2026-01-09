@@ -3,25 +3,32 @@
 import { useState } from 'react';
 import { 
   CheckCircle,
-  MessageSquare,
   Target,
   Sparkles,
   Calendar,
   Clock,
   ChevronRight,
   ChevronLeft,
-  ListTodo,
   Check,
   Flame,
   TrendingUp,
-  RefreshCw
+  AlertCircle,
+  Zap,
+  BookOpen,
+  ListTodo,
+  BarChart3,
+  Edit3,
+  ArrowRight,
+  Plus,
+  Play,
+  Trophy,
+  Rocket
 } from 'lucide-react';
 
 interface TutorialSlidesProps {
   onComplete: () => void;
 }
 
-// Exact GlassCard from landing page
 function GlassCard({ children, className = '', hover = false }: { 
   children: React.ReactNode; 
   className?: string;
@@ -43,22 +50,64 @@ function GlassCard({ children, className = '', hover = false }: {
 
 const slides = [
   {
-    id: 'today',
-    title: 'Today',
-    subtitle: 'Your daily command center',
-    description: 'See your tasks on the left, chat with Pepzi on the right. Reschedule anything with a quick message.',
+    id: 'problem',
+    title: 'Sound familiar?',
+    subtitle: 'The goal-setting struggle',
+    description: 'You set goals, start strong... then life gets busy. Two weeks later, you\'ve forgotten all about it.',
   },
   {
-    id: 'goals',
-    title: 'Goals',
-    subtitle: 'Your summits to conquer',
-    description: 'Create goals with our AI coach. We\'ll break them into a realistic training plan.',
+    id: 'solution',
+    title: 'Meet Pepzi',
+    subtitle: 'Your AI training coach',
+    description: 'Tell us your goal, we\'ll create a structured plan and show you exactly what to do each day.',
   },
   {
-    id: 'schedule',
-    title: 'Schedule',
-    subtitle: 'Your week at a glance',
-    description: 'See your full calendar. Everything scheduled automatically around your life.',
+    id: 'two-ways',
+    title: 'Two Ways to Start',
+    subtitle: 'AI-assisted or bring your own plan',
+    description: 'Let our AI create your training plan, or use Quick Add if you already have one from ChatGPT.',
+  },
+  {
+    id: 'review-plan',
+    title: 'Review Your Plan',
+    subtitle: 'Sessions & milestones',
+    description: 'See your sessions laid out week by week. Edit names, descriptions, or duration anytime.',
+  },
+  {
+    id: 'schedule-it',
+    title: 'Schedule It',
+    subtitle: 'Fit training around your life',
+    description: 'Auto-place sessions or pick your own times. Your calendar, your control.',
+  },
+  {
+    id: 'today-page',
+    title: 'Your Today Page',
+    subtitle: 'Wake up knowing exactly what to do',
+    description: 'See today\'s sessions, start the timer, mark complete. No more decision fatigue.',
+  },
+  {
+    id: 'backlog',
+    title: 'Life Happens',
+    subtitle: 'Missed a session? No stress',
+    description: 'Missed sessions go to your backlog. Catch up when you\'re ready - no guilt, just clarity.',
+  },
+  {
+    id: 'get-ahead',
+    title: 'Get Ahead',
+    subtitle: 'Feeling motivated?',
+    description: 'Done early? Do tomorrow\'s session today and finish your goal even faster.',
+  },
+  {
+    id: 'edit-weeks',
+    title: 'Edit Future Weeks',
+    subtitle: 'Change your routine anytime',
+    description: 'Don\'t like your current schedule? Redesign your weekly pattern for all future weeks.',
+  },
+  {
+    id: 'track-progress',
+    title: 'Track Your Progress',
+    subtitle: 'See how far you\'ve come',
+    description: 'View completion stats, session history, and time logged. Celebrate your wins! 🎉',
   },
 ];
 
@@ -83,7 +132,7 @@ export default function TutorialSlides({ onComplete }: TutorialSlidesProps) {
 
   return (
     <div className="min-h-screen relative overflow-hidden">
-      {/* Background - Exact same as landing page */}
+      {/* Background */}
       <div className="fixed inset-0 z-0">
         <div 
           className="absolute inset-0 bg-cover bg-bottom bg-no-repeat"
@@ -106,7 +155,7 @@ export default function TutorialSlides({ onComplete }: TutorialSlidesProps) {
       <div className="relative z-10 flex items-center justify-center min-h-screen px-4 py-12">
         <div className="w-full max-w-lg">
           {/* Header */}
-          <div className="text-center mb-6">
+          <div className="text-center mb-4">
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/60 backdrop-blur-sm border border-white/80 rounded-full text-sm text-slate-600 mb-4">
               <Sparkles className="w-4 h-4 text-slate-500" />
               Quick Tour • {currentSlide + 1} of {slides.length}
@@ -114,14 +163,16 @@ export default function TutorialSlides({ onComplete }: TutorialSlidesProps) {
           </div>
 
           {/* Progress Dots */}
-          <div className="flex items-center justify-center gap-2 mb-6">
+          <div className="flex items-center justify-center gap-1.5 mb-6">
             {slides.map((_, i) => (
               <button
                 key={i}
                 onClick={() => setCurrentSlide(i)}
                 className={`h-2 rounded-full transition-all duration-300 ${
                   i === currentSlide 
-                    ? 'w-8 bg-slate-600' 
+                    ? 'w-6 bg-slate-600' 
+                    : i < currentSlide
+                    ? 'w-2 bg-slate-400'
                     : 'w-2 bg-slate-300 hover:bg-slate-400'
                 }`}
               />
@@ -132,19 +183,26 @@ export default function TutorialSlides({ onComplete }: TutorialSlidesProps) {
           <GlassCard className="p-6">
             {/* Slide Title */}
             <div className="text-center mb-4">
-              <h2 className="text-3xl font-bold text-slate-800 mb-1">{slide.title}</h2>
-              <p className="text-slate-500">{slide.subtitle}</p>
+              <h2 className="text-2xl font-bold text-slate-800 mb-1">{slide.title}</h2>
+              <p className="text-slate-500 text-sm">{slide.subtitle}</p>
             </div>
 
-            {/* Phone Mockup */}
-            <div className="flex items-center justify-center py-4 min-h-[320px]">
-              {currentSlide === 0 && <TodayMockup />}
-              {currentSlide === 1 && <GoalsMockup />}
-              {currentSlide === 2 && <ScheduleMockup />}
+            {/* Mockup Area */}
+            <div className="flex items-center justify-center py-4 min-h-[280px]">
+              {currentSlide === 0 && <ProblemMockup />}
+              {currentSlide === 1 && <SolutionMockup />}
+              {currentSlide === 2 && <TwoWaysMockup />}
+              {currentSlide === 3 && <ReviewPlanMockup />}
+              {currentSlide === 4 && <ScheduleMockup />}
+              {currentSlide === 5 && <TodayMockup />}
+              {currentSlide === 6 && <BacklogMockup />}
+              {currentSlide === 7 && <GetAheadMockup />}
+              {currentSlide === 8 && <EditWeeksMockup />}
+              {currentSlide === 9 && <ProgressMockup />}
             </div>
 
             {/* Description */}
-            <p className="text-center text-slate-600 mb-6 px-2">
+            <p className="text-center text-slate-600 text-sm mb-6 px-2">
               {slide.description}
             </p>
 
@@ -170,8 +228,8 @@ export default function TutorialSlides({ onComplete }: TutorialSlidesProps) {
               >
                 {currentSlide === slides.length - 1 ? (
                   <>
-                    Got it, let's go!
-                    <CheckCircle className="w-4 h-4" />
+                    Let's go!
+                    <Rocket className="w-4 h-4" />
                   </>
                 ) : (
                   <>
@@ -189,179 +247,316 @@ export default function TutorialSlides({ onComplete }: TutorialSlidesProps) {
 }
 
 // ============================================================
-// TODAY PAGE MOCKUP - Shows BOTH task list AND chat
+// SLIDE 1: THE PROBLEM
 // ============================================================
-function TodayMockup() {
+function ProblemMockup() {
   return (
-    <div className="w-full max-w-sm">
-      <div className="flex gap-2">
-        {/* LEFT: Task List */}
-        <GlassCard className="flex-1 overflow-hidden" hover={false}>
-          {/* Header */}
-          <div className="p-2 border-b border-white/40">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-semibold text-slate-700">Today</p>
-                <p className="text-[8px] text-slate-400">Tuesday, Dec 23</p>
-              </div>
-              <div className="flex items-center gap-1 text-[9px]">
-                <span className="text-slate-600 font-bold">2</span>
-                <span className="text-slate-300">|</span>
-                <span className="text-emerald-600 font-bold">1</span>
-              </div>
-            </div>
-            <div className="h-1 bg-slate-100 rounded-full mt-1.5 overflow-hidden">
-              <div className="h-full w-1/3 bg-emerald-500 rounded-full" />
-            </div>
-          </div>
-
-          {/* Task cards */}
-          <div className="p-2 space-y-1.5">
-            <div className="bg-white/50 rounded-lg p-2 border border-white/60 flex items-center gap-1.5">
-              <div className="w-6 h-6 bg-emerald-100 rounded flex items-center justify-center">
-                <Check className="w-3 h-3 text-emerald-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[9px] font-medium text-slate-400 line-through">Morning Run</p>
-                <p className="text-[7px] text-slate-300">6:30am</p>
-              </div>
-            </div>
-
-            <div className="bg-white/50 rounded-lg p-2 border-2 border-slate-300 flex items-center gap-1.5">
-              <div className="w-6 h-6 bg-slate-100 rounded flex items-center justify-center">
-                <span className="text-[10px]">🏋️</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[9px] font-medium text-slate-700">Strength</p>
-                <p className="text-[7px] text-slate-400">7:00pm</p>
-              </div>
-            </div>
-
-            <div className="bg-white/50 rounded-lg p-2 border border-white/60 flex items-center gap-1.5">
-              <div className="w-6 h-6 bg-slate-100 rounded flex items-center justify-center">
-                <span className="text-[10px]">🇪🇸</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[9px] font-medium text-slate-700">Spanish</p>
-                <p className="text-[7px] text-slate-400">8:00pm</p>
-              </div>
-            </div>
-          </div>
-        </GlassCard>
-
-        {/* RIGHT: Chat */}
-        <GlassCard className="flex-1 overflow-hidden" hover={false}>
-          {/* Chat Header */}
-          <div className="p-2 border-b border-white/40 flex items-center gap-1.5">
-            <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center">
-              <Sparkles className="w-2.5 h-2.5 text-slate-500" />
-            </div>
-            <div>
-              <p className="text-[9px] font-semibold text-slate-700">Pepzi</p>
-              <p className="text-[7px] text-slate-400">Your AI PA</p>
-            </div>
-          </div>
-
-          {/* Chat Messages */}
-          <div className="p-2 space-y-1.5">
-            {/* AI asks about task */}
-            <div className="bg-white/60 rounded-lg p-1.5 border border-white/60">
-              <p className="text-[8px] text-slate-600">Did you do "Strength"?</p>
-              <div className="flex gap-1 mt-1">
-                <span className="px-1.5 py-0.5 bg-emerald-500 text-white text-[7px] rounded">Done ✓</span>
-                <span className="px-1.5 py-0.5 bg-white/80 text-slate-500 text-[7px] rounded border">Skip</span>
-              </div>
-            </div>
-
-            {/* User message */}
-            <div className="flex justify-end">
-              <div className="bg-slate-700 text-white text-[8px] p-1.5 rounded-lg max-w-[90%]">
-                Move it, I'm out with friends 🍻
-              </div>
-            </div>
-
-            {/* AI response */}
-            <div className="bg-white/60 rounded-lg p-1.5 border border-white/60">
-              <p className="text-[8px] text-slate-600">Done! Moved to tomorrow 7pm 🎉</p>
-              <div className="flex items-center gap-1 mt-1 p-1 bg-slate-50 rounded text-[7px] text-slate-400">
-                <Clock className="w-2.5 h-2.5" />
-                Wed → Thu
-              </div>
-            </div>
-          </div>
-
-          {/* Input */}
-          <div className="p-1.5 border-t border-white/40">
-            <div className="flex items-center bg-white/50 rounded-lg p-1.5 border border-white/60">
-              <span className="text-[7px] text-slate-400 flex-1">Chat with Pepzi...</span>
-              <div className="w-4 h-4 bg-slate-700 rounded flex items-center justify-center">
-                <ChevronRight className="w-2.5 h-2.5 text-white" />
-              </div>
-            </div>
-          </div>
-        </GlassCard>
+    <div className="w-full max-w-xs space-y-3">
+      {/* Stressed person with abandoned goals */}
+      <div className="text-center mb-4">
+        <div className="text-5xl mb-2">😩</div>
       </div>
+      
+      <GlassCard className="p-3 opacity-60" hover={false}>
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
+            <AlertCircle className="w-4 h-4 text-red-500" />
+          </div>
+          <div className="flex-1">
+            <p className="text-xs font-medium text-slate-400 line-through">Learn Spanish</p>
+            <p className="text-[10px] text-slate-300">Started 3 weeks ago...</p>
+          </div>
+        </div>
+      </GlassCard>
+
+      <GlassCard className="p-3 opacity-60" hover={false}>
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
+            <AlertCircle className="w-4 h-4 text-red-500" />
+          </div>
+          <div className="flex-1">
+            <p className="text-xs font-medium text-slate-400 line-through">Get fit</p>
+            <p className="text-[10px] text-slate-300">Last session: 2 weeks ago</p>
+          </div>
+        </div>
+      </GlassCard>
+
+      <GlassCard className="p-3 opacity-60" hover={false}>
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
+            <AlertCircle className="w-4 h-4 text-red-500" />
+          </div>
+          <div className="flex-1">
+            <p className="text-xs font-medium text-slate-400 line-through">Side project</p>
+            <p className="text-[10px] text-slate-300">Haven't touched it...</p>
+          </div>
+        </div>
+      </GlassCard>
     </div>
   );
 }
 
 // ============================================================
-// GOALS PAGE MOCKUP
+// SLIDE 2: THE SOLUTION
 // ============================================================
-function GoalsMockup() {
+function SolutionMockup() {
   return (
     <div className="w-full max-w-xs">
-      <GlassCard className="p-3 space-y-2" hover={false}>
+      <div className="text-center mb-4">
+        <div className="w-16 h-16 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
+          <Sparkles className="w-8 h-8 text-white" />
+        </div>
+      </div>
+
+      <GlassCard className="p-4" hover={false}>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center">
+              <Check className="w-4 h-4 text-emerald-600" />
+            </div>
+            <p className="text-sm text-slate-700">Tell us your goal</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center">
+              <Check className="w-4 h-4 text-emerald-600" />
+            </div>
+            <p className="text-sm text-slate-700">Get a structured plan</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center">
+              <Check className="w-4 h-4 text-emerald-600" />
+            </div>
+            <p className="text-sm text-slate-700">See daily sessions</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center">
+              <Check className="w-4 h-4 text-emerald-600" />
+            </div>
+            <p className="text-sm text-slate-700">Track your progress</p>
+          </div>
+        </div>
+      </GlassCard>
+    </div>
+  );
+}
+
+// ============================================================
+// SLIDE 3: TWO WAYS TO CREATE
+// ============================================================
+function TwoWaysMockup() {
+  return (
+    <div className="w-full max-w-xs space-y-3">
+      {/* AI Assisted */}
+      <GlassCard className="p-4 border-2 border-emerald-200" hover={false}>
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
+            <Sparkles className="w-6 h-6 text-emerald-600" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-slate-700">AI-Assisted Plan</p>
+            <p className="text-xs text-slate-500">We create your training plan</p>
+          </div>
+        </div>
+      </GlassCard>
+
+      <div className="text-center text-slate-400 text-sm">or</div>
+
+      {/* Quick Add */}
+      <GlassCard className="p-4 border-2 border-blue-200" hover={false}>
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+            <Plus className="w-6 h-6 text-blue-600" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-slate-700">Quick Add</p>
+            <p className="text-xs text-slate-500">Already have a ChatGPT plan?</p>
+          </div>
+        </div>
+      </GlassCard>
+
+      <p className="text-center text-xs text-slate-400 mt-2">
+        Both give you the same structured experience
+      </p>
+    </div>
+  );
+}
+
+// ============================================================
+// SLIDE 4: REVIEW PLAN
+// ============================================================
+function ReviewPlanMockup() {
+  return (
+    <div className="w-full max-w-xs">
+      <GlassCard className="p-3" hover={false}>
         {/* Header */}
-        <div className="flex items-center justify-between mb-1">
-          <h4 className="text-sm font-bold text-slate-700">Your Goals</h4>
-          <button className="p-1.5 bg-slate-800 rounded-lg">
-            <span className="text-white text-xs">+</span>
-          </button>
+        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/40">
+          <div className="w-8 h-8 bg-violet-500 rounded-lg flex items-center justify-center">
+            <span className="text-white text-sm">🇪🇸</span>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-700">Learn Spanish</p>
+            <p className="text-[10px] text-slate-400">12 weeks • 3x per week</p>
+          </div>
         </div>
 
-        {/* Goal cards */}
+        {/* Sessions */}
         <div className="space-y-2">
-          <div className="bg-white/50 rounded-xl p-3 border border-white/60">
-            <div className="flex items-start gap-2 mb-2">
-              <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-lg">🏔️</div>
-              <div className="flex-1">
-                <p className="text-xs font-semibold text-slate-700">Summit Kilimanjaro</p>
-                <p className="text-[10px] text-slate-400">Adventure • Aug 15</p>
+          <p className="text-[10px] font-semibold text-slate-500 uppercase">Week 1 • Foundation</p>
+          
+          <div className="bg-white/50 rounded-lg p-2 border border-white/60">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-700">Session 1</p>
+                <p className="text-[10px] text-slate-400">Basic greetings</p>
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-full w-2/3 bg-slate-500 rounded-full" />
+              <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                <Clock className="w-3 h-3" />
+                30m
               </div>
-              <span className="text-[10px] font-semibold text-slate-600">67%</span>
-            </div>
-            <div className="flex items-center justify-between mt-2 text-[10px] text-slate-400">
-              <span>48h logged</span>
-              <span className="flex items-center gap-1">
-                <TrendingUp className="w-3 h-3" />
-                24 sessions
-              </span>
             </div>
           </div>
 
-          <div className="bg-white/50 rounded-xl p-3 border border-white/60">
-            <div className="flex items-start gap-2 mb-2">
-              <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-lg">🇪🇸</div>
-              <div className="flex-1">
-                <p className="text-xs font-semibold text-slate-700">Spanish Fluency</p>
-                <p className="text-[10px] text-slate-400">Languages • Jul 15</p>
+          <div className="bg-white/50 rounded-lg p-2 border border-white/60">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-700">Session 2</p>
+                <p className="text-[10px] text-slate-400">Numbers 1-20</p>
+              </div>
+              <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                <Clock className="w-3 h-3" />
+                30m
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-full w-1/3 bg-slate-500 rounded-full" />
+          </div>
+
+          <div className="flex items-center gap-1 text-[10px] text-slate-400 justify-center pt-1">
+            <Edit3 className="w-3 h-3" />
+            Tap any session to edit
+          </div>
+        </div>
+      </GlassCard>
+    </div>
+  );
+}
+
+// ============================================================
+// SLIDE 5: SCHEDULE IT
+// ============================================================
+function ScheduleMockup() {
+  return (
+    <div className="w-full max-w-xs">
+      <GlassCard className="p-3" hover={false}>
+        {/* Mini calendar header */}
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-slate-700">Schedule Sessions</p>
+          <button className="px-2 py-1 bg-slate-800 text-white text-[10px] rounded-lg flex items-center gap-1">
+            <Zap className="w-3 h-3" />
+            Auto-place
+          </button>
+        </div>
+
+        {/* Calendar grid */}
+        <div className="space-y-1">
+          <div className="grid grid-cols-7 gap-1 text-center mb-1">
+            {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, i) => (
+              <span key={i} className="text-[9px] text-slate-400 font-medium">{day}</span>
+            ))}
+          </div>
+
+          {/* Time slots with sessions */}
+          {[
+            { time: '7am', blocks: [0, 1, 0, 1, 0, 1, 0] },
+            { time: '8am', blocks: [0, 0, 0, 0, 0, 0, 0] },
+            { time: '6pm', blocks: [0, 0, 0, 0, 0, 0, 0] },
+          ].map((row, i) => (
+            <div key={i} className="flex items-center gap-1">
+              <span className="text-[8px] text-slate-400 w-5">{row.time}</span>
+              <div className="flex-1 grid grid-cols-7 gap-0.5">
+                {row.blocks.map((block, j) => (
+                  <div 
+                    key={j} 
+                    className={`h-5 rounded-sm flex items-center justify-center ${
+                      block === 1 ? 'bg-emerald-200 border border-emerald-300' : 'bg-white/40 border border-dashed border-slate-200'
+                    }`}
+                  >
+                    {block === 1 && <span className="text-[8px]">🇪🇸</span>}
+                    {block === 0 && <Plus className="w-2 h-2 text-slate-300" />}
+                  </div>
+                ))}
               </div>
-              <span className="text-[10px] font-semibold text-slate-600">32%</span>
             </div>
-            <div className="flex items-center gap-1 mt-2">
-              <Flame className="w-3 h-3 text-orange-500" />
-              <span className="text-[10px] text-slate-500 font-medium">18 day streak!</span>
+          ))}
+        </div>
+
+        <p className="text-center text-[10px] text-slate-400 mt-3">
+          Tap empty slots or use auto-place
+        </p>
+      </GlassCard>
+    </div>
+  );
+}
+
+// ============================================================
+// SLIDE 6: TODAY PAGE
+// ============================================================
+function TodayMockup() {
+  return (
+    <div className="w-full max-w-xs">
+      <GlassCard className="p-3" hover={false}>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/40">
+          <div>
+            <p className="text-sm font-semibold text-slate-700">Today</p>
+            <p className="text-[10px] text-slate-400">Monday, Jan 5</p>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-slate-600 font-bold">2</span>
+            <span className="text-slate-300">|</span>
+            <span className="text-emerald-600 font-bold">1</span>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div className="h-1.5 bg-slate-100 rounded-full mb-3 overflow-hidden">
+          <div className="h-full w-1/3 bg-emerald-500 rounded-full" />
+        </div>
+
+        {/* Sessions */}
+        <div className="space-y-2">
+          {/* Completed */}
+          <div className="bg-emerald-50 rounded-lg p-2 border border-emerald-100 flex items-center gap-2">
+            <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
+              <Check className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div className="flex-1">
+              <p className="text-xs font-medium text-slate-400 line-through">Morning Run</p>
+              <p className="text-[10px] text-slate-300">30 mins ✓</p>
+            </div>
+          </div>
+
+          {/* Current */}
+          <div className="bg-white/80 rounded-lg p-2 border-2 border-emerald-400 flex items-center gap-2">
+            <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
+              <span className="text-sm">🇪🇸</span>
+            </div>
+            <div className="flex-1">
+              <p className="text-xs font-medium text-slate-700">Spanish Session 1</p>
+              <p className="text-[10px] text-slate-400">30 mins</p>
+            </div>
+            <button className="px-2 py-1 bg-emerald-500 text-white text-[9px] rounded-lg flex items-center gap-1">
+              <Play className="w-3 h-3" />
+              Start
+            </button>
+          </div>
+
+          {/* Upcoming */}
+          <div className="bg-white/50 rounded-lg p-2 border border-white/60 flex items-center gap-2 opacity-60">
+            <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center">
+              <span className="text-sm">💪</span>
+            </div>
+            <div className="flex-1">
+              <p className="text-xs font-medium text-slate-600">Gym</p>
+              <p className="text-[10px] text-slate-400">60 mins</p>
             </div>
           </div>
         </div>
@@ -371,82 +566,219 @@ function GoalsMockup() {
 }
 
 // ============================================================
-// SCHEDULE PAGE MOCKUP
+// SLIDE 7: BACKLOG
 // ============================================================
-function ScheduleMockup() {
+function BacklogMockup() {
   return (
     <div className="w-full max-w-xs">
       <GlassCard className="p-3" hover={false}>
-        {/* Header */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex gap-1">
-            {['Week', 'Month', 'Year'].map((tab, i) => (
-              <button 
-                key={tab}
-                className={`px-2.5 py-1.5 text-[10px] font-medium rounded-lg ${
-                  i === 0 ? 'bg-white/80 text-slate-700 shadow-sm' : 'text-slate-400'
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
+            <AlertCircle className="w-4 h-4 text-amber-600" />
           </div>
-          <button className="p-1.5 bg-white/50 rounded-lg">
-            <RefreshCw className="w-3 h-3 text-slate-500" />
+          <div>
+            <p className="text-sm font-semibold text-slate-700">Backlog</p>
+            <p className="text-[10px] text-slate-400">2 sessions to catch up</p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="bg-amber-50 rounded-lg p-2 border border-amber-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">🇪🇸</span>
+                <div>
+                  <p className="text-xs font-medium text-slate-700">Spanish Session 3</p>
+                  <p className="text-[10px] text-amber-600">1 day overdue</p>
+                </div>
+              </div>
+              <button className="px-2 py-1 bg-amber-500 text-white text-[9px] rounded-lg">
+                Do Now
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-amber-50 rounded-lg p-2 border border-amber-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">💪</span>
+                <div>
+                  <p className="text-xs font-medium text-slate-700">Gym Session 2</p>
+                  <p className="text-[10px] text-amber-600">2 days overdue</p>
+                </div>
+              </div>
+              <button className="px-2 py-1 bg-amber-500 text-white text-[9px] rounded-lg">
+                Do Now
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <p className="text-center text-[10px] text-slate-400 mt-3">
+          No stress - do them when you're ready
+        </p>
+      </GlassCard>
+    </div>
+  );
+}
+
+// ============================================================
+// SLIDE 8: GET AHEAD
+// ============================================================
+function GetAheadMockup() {
+  return (
+    <div className="w-full max-w-xs">
+      <GlassCard className="p-3 bg-gradient-to-br from-violet-50/80 to-purple-50/80" hover={false}>
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-10 h-10 bg-violet-100 rounded-xl flex items-center justify-center">
+            <Rocket className="w-5 h-5 text-violet-600" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-700">Get Ahead</p>
+            <p className="text-[10px] text-slate-400">Do future sessions early</p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="bg-white/60 rounded-lg p-2 border border-white/80">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">🇪🇸</span>
+                <div>
+                  <p className="text-xs font-medium text-slate-700">Spanish Session 5</p>
+                  <p className="text-[10px] text-slate-400">Scheduled: Tomorrow</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 mt-2">
+              <Zap className="w-3 h-3 text-emerald-500" />
+              <span className="text-[10px] text-emerald-600 font-medium">Finish 1 day earlier!</span>
+            </div>
+          </div>
+
+          <div className="bg-white/60 rounded-lg p-2 border border-white/80">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">💪</span>
+                <div>
+                  <p className="text-xs font-medium text-slate-700">Gym Session 4</p>
+                  <p className="text-[10px] text-slate-400">Scheduled: Wednesday</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 mt-2">
+              <Zap className="w-3 h-3 text-emerald-500" />
+              <span className="text-[10px] text-emerald-600 font-medium">Finish 2 days earlier!</span>
+            </div>
+          </div>
+        </div>
+      </GlassCard>
+    </div>
+  );
+}
+
+// ============================================================
+// SLIDE 9: EDIT FUTURE WEEKS
+// ============================================================
+function EditWeeksMockup() {
+  return (
+    <div className="w-full max-w-xs">
+      <GlassCard className="p-3" hover={false}>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-semibold text-slate-700">Weekly Schedule</p>
+          <button className="px-2 py-1 bg-violet-500 text-white text-[10px] rounded-lg flex items-center gap-1">
+            <Edit3 className="w-3 h-3" />
+            Edit Future Weeks
           </button>
         </div>
 
-        {/* Mini calendar */}
+        {/* Mini weekly view */}
         <div className="space-y-1">
-          {/* Days header */}
           <div className="grid grid-cols-7 gap-1 text-center mb-1">
             {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, i) => (
               <span key={i} className="text-[9px] text-slate-400 font-medium">{day}</span>
             ))}
           </div>
 
-          {/* Time slots */}
-          {[
-            { time: '6am', blocks: [1, 0, 1, 0, 1, 2, 0] },
-            { time: '9am', blocks: [3, 3, 3, 3, 3, 0, 0] },
-            { time: '12pm', blocks: [0, 0, 0, 0, 0, 0, 0] },
-            { time: '6pm', blocks: [0, 1, 0, 1, 0, 0, 0] },
-            { time: '8pm', blocks: [4, 0, 4, 0, 4, 0, 0] },
-          ].map((row, i) => (
-            <div key={i} className="flex items-center gap-1">
-              <span className="text-[8px] text-slate-400 w-6">{row.time}</span>
-              <div className="flex-1 grid grid-cols-7 gap-0.5">
-                {row.blocks.map((block, j) => (
-                  <div 
-                    key={j} 
-                    className={`h-3.5 rounded-sm ${
-                      block === 0 ? 'bg-white/40' :
-                      block === 1 ? 'bg-emerald-200' :
-                      block === 2 ? 'bg-amber-200' :
-                      block === 3 ? 'bg-slate-300' :
-                      'bg-blue-200'
-                    }`}
-                  />
-                ))}
+          <div className="grid grid-cols-7 gap-1">
+            {[1, 0, 1, 0, 1, 0, 0].map((has, i) => (
+              <div 
+                key={i}
+                className={`h-8 rounded flex items-center justify-center ${
+                  has ? 'bg-emerald-100 border border-emerald-200' : 'bg-white/40'
+                }`}
+              >
+                {has === 1 && <span className="text-xs">🇪🇸</span>}
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-1">
+            {[1, 1, 0, 1, 1, 0, 0].map((has, i) => (
+              <div 
+                key={i}
+                className={`h-8 rounded flex items-center justify-center ${
+                  has ? 'bg-blue-100 border border-blue-200' : 'bg-white/40'
+                }`}
+              >
+                {has === 1 && <span className="text-xs">💪</span>}
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* Legend */}
-        <div className="flex items-center justify-center gap-3 mt-3 pt-2 border-t border-white/40">
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 bg-emerald-200 rounded-sm" />
-            <span className="text-[9px] text-slate-400">Training</span>
+        <p className="text-center text-[10px] text-slate-400 mt-3">
+          Changes apply to all future weeks
+        </p>
+      </GlassCard>
+    </div>
+  );
+}
+
+// ============================================================
+// SLIDE 10: TRACK PROGRESS
+// ============================================================
+function ProgressMockup() {
+  return (
+    <div className="w-full max-w-xs">
+      <GlassCard className="p-3" hover={false}>
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+            <Trophy className="w-5 h-5 text-emerald-600" />
           </div>
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 bg-slate-300 rounded-sm" />
-            <span className="text-[9px] text-slate-400">Work</span>
+          <div>
+            <p className="text-sm font-semibold text-slate-700">Learn Spanish</p>
+            <p className="text-[10px] text-slate-400">67% complete</p>
           </div>
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 bg-blue-200 rounded-sm" />
-            <span className="text-[9px] text-slate-400">Learning</span>
+        </div>
+
+        {/* Progress bar */}
+        <div className="h-2 bg-slate-100 rounded-full mb-4 overflow-hidden">
+          <div className="h-full w-2/3 bg-emerald-500 rounded-full" />
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="bg-white/50 rounded-lg p-2 text-center">
+            <p className="text-lg font-bold text-slate-700">24</p>
+            <p className="text-[9px] text-slate-400">Sessions Done</p>
           </div>
+          <div className="bg-white/50 rounded-lg p-2 text-center">
+            <p className="text-lg font-bold text-slate-700">12h</p>
+            <p className="text-[9px] text-slate-400">Time Logged</p>
+          </div>
+          <div className="bg-white/50 rounded-lg p-2 text-center">
+            <div className="flex items-center justify-center gap-1">
+              <Flame className="w-4 h-4 text-orange-500" />
+              <p className="text-lg font-bold text-slate-700">18</p>
+            </div>
+            <p className="text-[9px] text-slate-400">Day Streak</p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-center gap-2 pt-2 border-t border-white/40">
+          <span className="text-xl">🎉</span>
+          <p className="text-xs text-slate-600 font-medium">You're crushing it!</p>
         </div>
       </GlassCard>
     </div>

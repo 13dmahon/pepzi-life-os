@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from './supabase-client';
 import { useRouter, usePathname } from 'next/navigation';
@@ -33,7 +33,21 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const PUBLIC_ROUTES = ['/login', '/signup', '/auth/callback', '/forgot-password', '/'];
+// Only public routes - everything else requires auth
+const PUBLIC_ROUTES = new Set([
+  '/',
+  '/login',
+  '/signup',
+  '/auth/callback',
+  '/forgot-password',
+]);
+
+// ============================================================
+// STABILITY CONSTANTS — Session 2 Fixes
+// ============================================================
+const AUTH_INIT_TIMEOUT_MS = 8000;      // AuthInitGuard_v1: Max time for entire auth init
+const PROFILE_FETCH_TIMEOUT_MS = 5000;  // ProfileFetchTimeout_v1: Max time for profile fetch
+const SESSION_FETCH_TIMEOUT_MS = 6000;  // Max time for getSession()
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -41,29 +55,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [authCheckedOnce, setAuthCheckedOnce] = useState(false);
+
   const router = useRouter();
   const pathname = usePathname();
 
-  const fetchProfile = async (userId: string, retries = 3): Promise<UserProfile | null> => {
+  // Init guards
+  const initStarted = useRef(false);
+  const initCompleted = useRef(false);
+
+  // Profile safeguards
+  const profileFetchPromise = useRef<Promise<UserProfile | null> | null>(null); // ProfileFetchSingleFlight_v1
+  const profileCheckedOnce = useRef(false);
+
+  // ============================================================
+  // ProfileFetchSingleFlight_v1 + ProfileFetchTimeout_v1
+  // - Reuse in-flight promise (no duplicate fetches)
+  // - Hard timeout prevents indefinite hang
+  // ============================================================
+  const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
+    if (profileFetchPromise.current) {
+      console.log('[Auth] ProfileFetchSingleFlight_v1: Awaiting existing fetch');
+      return profileFetchPromise.current;
+    }
+
     setProfileLoading(true);
-    try {
-      for (let i = 0; i < retries; i++) {
+
+    const run = async (): Promise<UserProfile | null> => {
+      try {
         const { data, error } = await supabase
           .from('users')
           .select('*')
           .eq('id', userId)
-          .single();
+          .maybeSingle();
 
-        if (data) return data as UserProfile;
-
-        if (error && i < retries - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
+        if (error) {
+          console.error('[Auth] Profile fetch error:', error.message);
+          return null;
         }
+
+        console.log('[Auth] Profile fetched successfully');
+        return (data as UserProfile) ?? null;
+      } catch (err) {
+        console.error('[Auth] Profile fetch exception:', err);
+        return null;
+      } finally {
+        profileCheckedOnce.current = true;
+        setProfileLoading(false);
+        profileFetchPromise.current = null;
       }
-      return null;
-    } finally {
-      setProfileLoading(false);
-    }
+    };
+
+    // Clear timeout when run() finishes to avoid false timeout logs
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    profileFetchPromise.current = Promise.race([
+      run().finally(() => {
+        if (timeoutId) clearTimeout(timeoutId);
+      }),
+      new Promise<UserProfile | null>((resolve) => {
+        timeoutId = setTimeout(() => {
+          console.error('[Auth] ProfileFetchTimeout_v1: Timed out after', PROFILE_FETCH_TIMEOUT_MS, 'ms');
+          profileCheckedOnce.current = true;
+          resolve(null);
+        }, PROFILE_FETCH_TIMEOUT_MS);
+      }),
+    ]);
+
+    return profileFetchPromise.current;
   };
 
   const refreshProfile = async () => {
@@ -74,21 +133,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (initStarted.current) return;
+    initStarted.current = true;
+
+    // ============================================================
+    // AuthInitGuard_v1 — Hard timeout for auth init
+    // No code path may leave loading=true forever.
+    // ============================================================
+    const initTimeoutId = setTimeout(() => {
+      if (!initCompleted.current) {
+        console.error(
+          '[Auth] AuthInitGuard_v1: Init timed out after',
+          AUTH_INIT_TIMEOUT_MS,
+          'ms — forcing completion'
+        );
+        setLoading(false);
+        setAuthCheckedOnce(true);
+        initCompleted.current = true;
+      }
+    }, AUTH_INIT_TIMEOUT_MS);
+
     const initAuth = async () => {
+      console.log('[Auth] Initializing...');
+
       try {
-        const { data: { session: initialSession } } = await supabase.auth.getSession();
-        
-        setSession(initialSession);
-        setUser(initialSession?.user ?? null);
+        let initialSession: Session | null = null;
+
+        try {
+          const result = await Promise.race([
+            supabase.auth.getSession(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('getSession timeout')), SESSION_FETCH_TIMEOUT_MS)
+            ),
+          ]);
+
+          if (result.error) {
+            console.error('[Auth] Session error:', result.error.message);
+          } else {
+            initialSession = result.data.session;
+          }
+        } catch {
+          console.warn('[Auth] AuthInitGuard_v1: getSession() timed out after', SESSION_FETCH_TIMEOUT_MS, 'ms');
+        }
+
+        console.log('[Auth] Session result:', initialSession ? 'Found session' : 'No session');
 
         if (initialSession?.user) {
+          setSession(initialSession);
+          setUser(initialSession.user);
+
           const profileData = await fetchProfile(initialSession.user.id);
           setProfile(profileData);
+          console.log('[Auth] Profile loaded:', profileData ? 'Success' : 'Not found/timeout');
+        } else {
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          profileCheckedOnce.current = true;
         }
       } catch (error) {
-        console.error('Auth init error:', error);
+        console.error('[Auth] Init error:', error);
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        profileCheckedOnce.current = true;
       } finally {
+        clearTimeout(initTimeoutId);
+        console.log('[Auth] Init complete');
         setLoading(false);
+        setAuthCheckedOnce(true);
+        initCompleted.current = true;
       }
     };
 
@@ -96,60 +210,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, currentSession) => {
-        console.log('Auth event:', event);
+        console.log('[Auth] State change:', event);
+
+        // Always update auth truth immediately
         setSession(currentSession);
         setUser(currentSession?.user ?? null);
 
         if (currentSession?.user) {
           if (event === 'SIGNED_IN') {
             await new Promise(resolve => setTimeout(resolve, 300));
+            const profileData = await fetchProfile(currentSession.user.id);
+            setProfile(profileData);
           }
-          const profileData = await fetchProfile(currentSession.user.id);
-          setProfile(profileData);
-        } else {
+
+          // IMPORTANT: don't reference `profile` state here (stale in this effect)
+          if (event === 'TOKEN_REFRESHED' && !profileCheckedOnce.current) {
+            console.log('[Auth] TOKEN_REFRESHED and profile not checked — fetching');
+            const profileData = await fetchProfile(currentSession.user.id);
+            setProfile(profileData);
+          }
+        } else if (event === 'SIGNED_OUT') {
           setProfile(null);
+          profileCheckedOnce.current = false;
         }
 
-        // Don't handle redirect here for SIGNED_OUT - handleSignOut does it
-        // This prevents race conditions and double redirects
+        setAuthCheckedOnce(true);
+        setLoading(false);
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(initTimeoutId);
+      subscription.unsubscribe();
+    };
   }, []);
 
+  // ============================================================
+  // Redirect logic with ProfileNullNoInfiniteWait_v1
+  // FIX: /login and /signup must redirect even though they are "public"
+  // ============================================================
   useEffect(() => {
-    // Don't do anything while initial auth is loading
     if (loading) return;
-    
-    // Don't redirect while profile is still loading
     if (profileLoading) return;
 
-    // Allow root path without checks
-    if (pathname === '/' || pathname === '') return;
+    const path = pathname || '';
+    const isPublicRoute = PUBLIC_ROUTES.has(path);
 
-    const isPublicRoute = PUBLIC_ROUTES.some(route => pathname?.startsWith(route));
-
-    if (!user && !isPublicRoute) {
-      // Not logged in and trying to hit a protected route → send to login
-      router.push('/login');
-    } else if (user && !profileLoading && profile !== null && profile.onboarding_complete === false && pathname !== '/onboarding') {
-      // Only redirect to onboarding if we're CERTAIN onboarding is not complete
-      // profile must be loaded (not null) and explicitly false
-      router.push('/onboarding');
-    } else if (user && (pathname === '/login' || pathname === '/signup')) {
-      // Logged-in user on login/signup page
-      if (profile === null) {
-        // Profile still loading, wait
-        return;
+    // ✅ If logged in, redirect away from /login or /signup to /today
+    if (path === '/login' || path === '/signup') {
+      if (user) {
+        router.replace('/today');
       }
-      if (!profile.onboarding_complete) {
-        router.push('/onboarding');
-      } else {
-        router.push('/today');
-      }
+      return;
     }
-  }, [user, profile, loading, profileLoading, pathname, router]);
+
+    // Public pages: do nothing (includes Home/Feed)
+    if (isPublicRoute) return;
+
+    // Protected pages: require auth
+    if (!user) {
+      if (!authCheckedOnce) return;
+      router.replace('/login');
+      return;
+    }
+
+    // No onboarding gate - users go straight to the app
+  }, [user, profile, loading, profileLoading, pathname, router, authCheckedOnce]);
 
   const handleSignUp = async (email: string, password: string, name: string) => {
     const { data, error } = await supabase.auth.signUp({
@@ -174,24 +300,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const handleSignOut = async () => {
-    // Clear state immediately - don't wait for Supabase
     setUser(null);
     setSession(null);
     setProfile(null);
-    
-    // Fire signOut but don't block on it
-    // Use Promise.race with a timeout to prevent hanging
-    const signOutPromise = supabase.auth.signOut();
-    const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2000));
-    
-    try {
-      await Promise.race([signOutPromise, timeoutPromise]);
-    } catch (error) {
-      console.error('SignOut error (non-blocking):', error);
+    setAuthCheckedOnce(false);
+    profileCheckedOnce.current = false;
+
+    if (typeof window !== 'undefined') {
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('sb-')) {
+          localStorage.removeItem(key);
+        }
+      });
     }
-    
-    // Always redirect regardless of signOut result
-    // Use window.location for a clean redirect that clears any cached state
+
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error('[Auth] SignOut error:', error);
+    }
+
     window.location.href = '/login';
   };
 

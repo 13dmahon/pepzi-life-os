@@ -419,7 +419,7 @@ router.post('/confirm-log', async (req: Request, res: Response) => {
 /**
  * GET /api/chat/today-summary
  * Get summary of today's tasks with tracking requirements
- * 🆕 Now includes resource_link and resource_link_label from goals
+ * 🆕 Now includes type field and resource_link from goals
  */
 router.get('/today-summary', async (req: Request, res: Response) => {
   try {
@@ -443,9 +443,11 @@ router.get('/today-summary', async (req: Request, res: Response) => {
         goal_name: block.goals?.name || 'General',
         goal_id: block.goal_id,
         category: block.goals?.category,
+        type: block.type,  // 🆕 Include block type for filtering
         scheduled_time: block.scheduled_start,
         duration_mins: block.duration_mins,
         status: block.status,
+        started_at: block.started_at,  // 🆕 Include started_at for timer
         completed_at: block.completed_at,
         tracked_data: block.tracked_data,
         // 🆕 Include resource link from the goal
@@ -554,6 +556,7 @@ router.get('/missed-sessions', async (req: Request, res: Response) => {
         goal_name: block.goals?.name || 'General',
         goal_id: block.goal_id,
         category: block.goals?.category,
+        type: block.type,  // 🆕 Include block type
         scheduled_time: block.scheduled_start,
         duration_mins: block.duration_mins,
         status: block.status,

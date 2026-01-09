@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, Fragment, useRef } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import QuickSchedulePicker from '@/components/QuickSchedulePicker';
 import { 
   MessageCircle, 
   Target, 
@@ -12,9 +14,11 @@ import {
   Heart,
   Plus,
   Flag,
-  Send,
   Check,
   Clock,
+  Lock,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
 
 // ============================================================
@@ -31,11 +35,58 @@ interface FeedItemType {
   likes: number;
   liked: boolean;
   streak?: number;
+  image?: string;
+}
+
+interface PreviewSession {
+  name: string;
+  description: string;
+  duration_mins: number;
+  notes?: string;
+}
+
+interface PreviewData {
+  goal: {
+    name: string;
+    category: string;
+  };
+  plan: {
+    weekly_hours: number;
+    sessions_per_week: number;
+    session_length_mins: number;
+    total_weeks: number;
+    total_hours: number;
+  };
+  preview: {
+    week1: {
+      week_number: number;
+      focus: string;
+      sessions: PreviewSession[];
+    };
+    locked_weeks: number;
+  };
+  reasoning: {
+    session_length_reason: string;
+    hour_estimate_notes: string;
+  };
+}
+
+interface ScheduleSelection {
+  days: string[];
+  preferredTime: 'morning' | 'afternoon' | 'evening';
+  specificTimes: Record<string, string>;
 }
 
 // ============================================================
 // CONSTANTS
 // ============================================================
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+
+const MIN_GOAL_LENGTH = 3;
+const MAX_GOAL_LENGTH = 150;
+
+const DEMO_GOALS = ['Learn guitar', 'Get fit', 'Learn Spanish'];
 
 const avatarColors = [
   'from-blue-400 to-blue-600',
@@ -54,6 +105,7 @@ const generateFeedItems = (): FeedItemType[] => [
     timeAgo: '2h',
     likes: 89,
     liked: false,
+    image: 'https://images.pexels.com/photos/3621182/pexels-photo-3621182.jpeg?auto=compress&cs=tinysrgb&w=800',
   },
   {
     id: 2,
@@ -64,6 +116,7 @@ const generateFeedItems = (): FeedItemType[] => [
     timeAgo: '5h',
     likes: 156,
     liked: true,
+    image: 'https://images.pexels.com/photos/1751731/pexels-photo-1751731.jpeg?auto=compress&cs=tinysrgb&w=800',
   },
   {
     id: 3,
@@ -74,6 +127,7 @@ const generateFeedItems = (): FeedItemType[] => [
     timeAgo: '1d',
     likes: 234,
     liked: false,
+    image: 'https://images.pexels.com/photos/3278768/pexels-photo-3278768.jpeg?auto=compress&cs=tinysrgb&w=800',
   },
 ];
 
@@ -81,6 +135,12 @@ const categoryIcons: Record<string, string> = {
   fitness: '🏃',
   skill: '🎯',
   education: '📚',
+  languages: '🌍',
+  music: '🎸',
+  business: '💼',
+  creative: '🎨',
+  health: '❤️',
+  mental_health: '🧘',
 };
 
 // ============================================================
@@ -107,8 +167,231 @@ function GlassCard({ children, className = '', hover = true }: {
 }
 
 // ============================================================
-// CINEMATIC SCHEDULE ANIMATION - FULL EXPERIENCE V3
-// Premium loader → Dark hero → Clean session cards → Schedule
+// PLAN PREVIEW DISPLAY (shown after user submits)
+// ============================================================
+
+function PlanPreviewDisplay({ preview, onSignup }: { preview: PreviewData; onSignup: (schedule?: ScheduleSelection) => void }) {
+  const [showSchedulePicker, setShowSchedulePicker] = useState(false);
+  
+  const sessionsPerWeek = preview.plan.sessions_per_week;
+  
+  const today = new Date();
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const todayName = dayNames[today.getDay()];
+  
+  const getDefaultDays = () => {
+    const allDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const todayIndex = allDays.indexOf(todayName);
+    if (todayIndex === -1) return ['Monday', 'Wednesday', 'Friday'].slice(0, sessionsPerWeek);
+    
+    const reordered = [...allDays.slice(todayIndex), ...allDays.slice(0, todayIndex)];
+    const spacing = Math.floor(7 / sessionsPerWeek);
+    const selected: string[] = [];
+    
+    for (let i = 0; i < sessionsPerWeek; i++) {
+      selected.push(reordered[(i * spacing) % 7]);
+    }
+    
+    if (!selected.includes(todayName)) {
+      selected[0] = todayName;
+    }
+    
+    return selected;
+  };
+  
+  const selectedDays = getDefaultDays();
+  const eveningTimes = ['6:00 PM', '6:30 PM', '7:00 PM', '7:30 PM', '8:00 PM'];
+  const firstSessionIsToday = selectedDays[0] === todayName;
+
+  const handleScheduleConfirm = (schedule: ScheduleSelection) => {
+    setShowSchedulePicker(false);
+    onSignup(schedule);
+  };
+
+  const handleSkipSchedule = () => {
+    const autoSchedule: ScheduleSelection = {
+      days: selectedDays.map(d => d.toLowerCase()),
+      preferredTime: 'evening',
+      specificTimes: {},
+    };
+    selectedDays.forEach(day => {
+      autoSchedule.specificTimes[day.toLowerCase()] = '18:30';
+    });
+    onSignup(autoSchedule);
+  };
+
+  if (showSchedulePicker) {
+    return (
+      <div className="w-full max-w-md mx-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <QuickSchedulePicker
+          sessionsPerWeek={sessionsPerWeek}
+          sessionDurationMins={preview.plan.session_length_mins}
+          goalName={preview.goal.name}
+          onConfirm={handleScheduleConfirm}
+          onSkip={handleSkipSchedule}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <GlassCard className="p-5" hover={false}>
+        <div className="flex items-center gap-3 mb-3">
+          <div className="text-3xl">{categoryIcons[preview.goal.category] || '🎯'}</div>
+          <div>
+            <h3 className="font-bold text-slate-800 text-lg">{preview.goal.name}</h3>
+            <p className="text-slate-500 text-sm">Your {preview.plan.total_weeks}-week starter plan</p>
+          </div>
+        </div>
+        
+        <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 mb-4">
+          <p className="text-emerald-800 text-sm text-center">
+            <span className="font-semibold">🎯 We think this goal will take {preview.plan.total_weeks} weeks</span>
+            <br />
+            <span className="text-emerald-600 text-xs">if you complete all {preview.plan.total_weeks * preview.plan.sessions_per_week} sessions</span>
+          </p>
+        </div>
+        
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="bg-slate-50 rounded-xl p-3 text-center">
+            <div className="text-2xl font-bold text-slate-800">{preview.plan.total_weeks}</div>
+            <div className="text-xs text-slate-500">weeks</div>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-3 text-center">
+            <div className="text-2xl font-bold text-slate-800">{preview.plan.sessions_per_week}x</div>
+            <div className="text-xs text-slate-500">per week</div>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-3 text-center">
+            <div className="text-2xl font-bold text-slate-800">{preview.plan.session_length_mins}m</div>
+            <div className="text-xs text-slate-500">sessions</div>
+          </div>
+        </div>
+        
+        <p className="text-xs text-slate-400 text-center">
+          💡 {preview.reasoning.session_length_reason}
+        </p>
+      </GlassCard>
+
+      <GlassCard className="p-5" hover={false}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
+              <Calendar className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div>
+              <h4 className="font-semibold text-slate-800">Week 1 Schedule</h4>
+              <p className="text-xs text-slate-500">{preview.preview.week1.focus}</p>
+            </div>
+          </div>
+          <span className="text-xs text-emerald-600 font-medium bg-emerald-50 px-2 py-1 rounded-full">
+            Preview
+          </span>
+        </div>
+        
+        <div className="space-y-3">
+          {preview.preview.week1.sessions.map((session, idx) => (
+            <div 
+              key={idx}
+              className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <div className="bg-slate-800 text-white text-xs font-medium px-2 py-1 rounded-md">
+                  {selectedDays[idx % selectedDays.length]}
+                </div>
+                <span className="text-slate-500 text-xs">
+                  {eveningTimes[idx % eveningTimes.length]}
+                </span>
+                <span className="text-slate-300">•</span>
+                <span className="text-xs text-slate-400 flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  {session.duration_mins}m
+                </span>
+              </div>
+              
+              <h5 className="font-medium text-slate-800 text-sm mb-1">{session.name}</h5>
+              <p className="text-xs text-slate-600 mb-2">{session.description}</p>
+              {session.notes && (
+                <p className="text-xs text-amber-600 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" />
+                  {session.notes}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </GlassCard>
+
+      <div className="relative">
+        <GlassCard className="p-5 opacity-60" hover={false}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-slate-200 rounded-lg flex items-center justify-center">
+                <Lock className="w-4 h-4 text-slate-400" />
+              </div>
+              <div>
+                <h4 className="font-semibold text-slate-500">Weeks 2-{preview.plan.total_weeks}</h4>
+                <p className="text-xs text-slate-400">
+                  {preview.preview.locked_weeks} more weeks of scheduled sessions
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="space-y-2">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-16 bg-slate-100 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        </GlassCard>
+        
+        {/* TWO EQUAL PROMINENT CTA BUTTONS */}
+        <div className="absolute inset-0 bg-gradient-to-t from-white via-white/90 to-transparent flex flex-col items-center justify-end pb-6">
+          <p className="text-sm text-slate-600 font-medium mb-4">When do you want to train?</p>
+          
+          <div className="flex flex-col sm:flex-row gap-3 w-full max-w-md px-4">
+            {/* Option 1: Auto-schedule */}
+            <button
+              onClick={handleSkipSchedule}
+              className="flex-1 px-5 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl font-semibold shadow-xl transition-all hover:scale-[1.02] flex flex-col items-center gap-1"
+            >
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5" />
+                <span>{firstSessionIsToday ? 'Start today' : 'Auto-schedule'}</span>
+              </div>
+              <span className="text-xs text-slate-300 font-normal">
+                We&apos;ll pick the best times
+              </span>
+            </button>
+            
+            {/* Option 2: Choose times */}
+            <button
+              onClick={() => setShowSchedulePicker(true)}
+              className="flex-1 px-5 py-4 bg-white hover:bg-slate-50 text-slate-800 rounded-2xl font-semibold shadow-xl border-2 border-slate-200 transition-all hover:scale-[1.02] hover:border-slate-300 flex flex-col items-center gap-1"
+            >
+              <div className="flex items-center gap-2">
+                <Calendar className="w-5 h-5" />
+                <span>Choose my times</span>
+              </div>
+              <span className="text-xs text-slate-500 font-normal">
+                Pick days & times that work
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <div className="text-center pt-2">
+        <p className="text-sm text-slate-400">
+          Free · No credit card required
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// CINEMATIC SCHEDULE ANIMATION
 // ============================================================
 
 const GOALS = [
@@ -281,12 +564,10 @@ const TIME_SLOTS = ['Morning', 'Afternoon', 'Evening', 'Night'];
 const GRID_TARGETS: [number, number][] = [[0, 1], [2, 2], [4, 1], [5, 0]];
 
 type Phase = 
-  | 'typing' 
   | 'loading'
   | 'heroReveal'
   | 'sessionsIntro'
   | 'sessions'
-  | 'planCard'
   | 'findingTime'
   | 'dropping'
   | 'scheduled'
@@ -295,56 +576,37 @@ type Phase =
   | 'userResponse'
   | 'onTrack'
   | 'celebration'
-  | 'cta';
+  | 'restart';
 
-function ScheduleSlotAnimation() {
-  const [goalIndex, setGoalIndex] = useState(0);
-  const [phase, setPhase] = useState<Phase>('typing');
-  const [typedText, setTypedText] = useState('');
+function ScheduleAnimation({ currentGoalIndex, onCycleComplete }: { currentGoalIndex: number; onCycleComplete: () => void }) {
+  const [phase, setPhase] = useState<Phase>('loading');
   const [currentSession, setCurrentSession] = useState(0);
   const [dropIndex, setDropIndex] = useState(-1);
   const [responseTyped, setResponseTyped] = useState('');
   const [confetti, setConfetti] = useState<{id: number, x: number, delay: number, color: string}[]>([]);
   
-  const goal = GOALS[goalIndex];
+  const goal = GOALS[currentGoalIndex];
   const responseText = "Yes, done! ✓";
 
-  // Reset
   useEffect(() => {
-    setPhase('typing');
-    setTypedText('');
+    setPhase('loading');
     setCurrentSession(0);
     setDropIndex(-1);
     setResponseTyped('');
     setConfetti([]);
-  }, [goalIndex]);
+  }, [currentGoalIndex]);
 
-  // Typing goal
-  useEffect(() => {
-    if (phase !== 'typing') return;
-    if (typedText.length < goal.name.length) {
-      const t = setTimeout(() => setTypedText(goal.name.slice(0, typedText.length + 1)), 100);
-      return () => clearTimeout(t);
-    } else {
-      const t = setTimeout(() => setPhase('loading'), 600);
-      return () => clearTimeout(t);
-    }
-  }, [phase, typedText, goal.name]);
-
-  // Session flipping - give more time to read each page
   useEffect(() => {
     if (phase !== 'sessions') return;
     if (currentSession < 3) {
       const t = setTimeout(() => setCurrentSession(prev => prev + 1), 2500);
       return () => clearTimeout(t);
     } else {
-      // After last session, go to findingTime
       const t = setTimeout(() => setPhase('findingTime'), 2000);
       return () => clearTimeout(t);
     }
   }, [phase, currentSession]);
 
-  // Drop sequence
   useEffect(() => {
     if (phase !== 'dropping') return;
     if (dropIndex < 3) {
@@ -360,7 +622,6 @@ function ScheduleSlotAnimation() {
     if (phase === 'dropping' && dropIndex === -1) setDropIndex(0);
   }, [phase, dropIndex]);
 
-  // Response typing
   useEffect(() => {
     if (phase !== 'userResponse') return;
     if (responseTyped.length < responseText.length) {
@@ -372,7 +633,6 @@ function ScheduleSlotAnimation() {
     }
   }, [phase, responseTyped]);
 
-  // Confetti
   useEffect(() => {
     if (phase === 'celebration' && confetti.length === 0) {
       const colors = ['#f59e0b', '#10b981', '#3b82f6', '#ec4899', '#8b5cf6'];
@@ -386,263 +646,95 @@ function ScheduleSlotAnimation() {
     }
   }, [phase, confetti.length]);
 
-  // Phase progression
   useEffect(() => {
     const timings: Partial<Record<Phase, number>> = {
       loading: 2500,
       heroReveal: 3000,
       sessionsIntro: 2500,
-      sessions: 1800,
-      planCard: 2500,
       findingTime: 2000,
       scheduled: 1200,
       calendarFly: 800,
       notification: 3500,
       onTrack: 2500,
       celebration: 3500,
-      cta: 3000,
+      restart: 2000,
     };
     
     const nextPhase: Partial<Record<Phase, Phase>> = {
       loading: 'heroReveal',
       heroReveal: 'sessionsIntro',
       sessionsIntro: 'sessions',
-      planCard: 'findingTime',
       findingTime: 'dropping',
       scheduled: 'calendarFly',
       calendarFly: 'notification',
       notification: 'userResponse',
       onTrack: 'celebration',
-      celebration: 'cta',
+      celebration: 'restart',
     };
 
     if (phase in nextPhase) {
       const t = setTimeout(() => setPhase(nextPhase[phase]!), timings[phase]!);
       return () => clearTimeout(t);
     }
-    if (phase === 'cta') {
-      const t = setTimeout(() => setGoalIndex(prev => (prev + 1) % GOALS.length), timings.cta!);
+    
+    if (phase === 'restart') {
+      const t = setTimeout(() => onCycleComplete(), timings.restart!);
       return () => clearTimeout(t);
     }
-  }, [phase]);
+  }, [phase, onCycleComplete]);
 
   return (
-    <div className="w-full max-w-xl mx-auto flex flex-col" style={{ minHeight: '520px' }}>
+    <div className="w-full flex flex-col" style={{ minHeight: '480px' }}>
       <style jsx>{`
-        /* ===== ANIMATIONS ===== */
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .book-wrapper { perspective: 2000px; perspective-origin: center center; }
+        .book-3d { width: 320px; height: 380px; position: relative; transform-style: preserve-3d; transform: rotateX(5deg); }
+        .book-page { position: absolute; width: 100%; height: 100%; transform-style: preserve-3d; transform-origin: left center; transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; }
+        .book-page.flipped { transform: rotateY(-180deg); }
+        .page-front, .page-back { position: absolute; width: 100%; height: 100%; -webkit-backface-visibility: hidden; backface-visibility: hidden; border-radius: 2px 12px 12px 2px; overflow: hidden; }
+        .page-front { background: linear-gradient(to right, #f9fafb, #ffffff); box-shadow: 4px 4px 20px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05); }
+        .page-content { padding: 16px 18px; height: 100%; overflow: hidden; }
+        .page-back { background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%); transform: rotateY(180deg); box-shadow: -4px 4px 20px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05); }
+        .book-back { position: absolute; width: 100%; height: 100%; background: linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%); border-radius: 2px 12px 12px 2px; box-shadow: 0 15px 50px rgba(0,0,0,0.2); }
+        .book-page::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: linear-gradient(to right, #e2e8f0, transparent); }
 
-        /* ===== 3D BOOK WITH PAGE FLIPS ===== */
-        .book-wrapper {
-          perspective: 2000px;
-          perspective-origin: center center;
-        }
-        .book-3d {
-          width: 320px;
-          height: 380px;
-          position: relative;
-          transform-style: preserve-3d;
-          transform: rotateX(5deg);
-        }
-        .book-page {
-          position: absolute;
-          width: 100%;
-          height: 100%;
-          transform-style: preserve-3d;
-          transform-origin: left center;
-          transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);
-          cursor: pointer;
-        }
-        .book-page.flipped {
-          transform: rotateY(-180deg);
-        }
-        .page-front, .page-back {
-          position: absolute;
-          width: 100%;
-          height: 100%;
-          -webkit-backface-visibility: hidden;
-          backface-visibility: hidden;
-          border-radius: 2px 12px 12px 2px;
-          overflow: hidden;
-        }
-        .page-front {
-          background: linear-gradient(to right, #f9fafb, #ffffff);
-          box-shadow: 
-            4px 4px 20px rgba(0,0,0,0.15),
-            0 0 0 1px rgba(0,0,0,0.05);
-        }
-        .page-content {
-          padding: 16px 18px;
-          height: 100%;
-          overflow: hidden;
-        }
-        .page-back {
-          background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
-          transform: rotateY(180deg);
-          box-shadow: 
-            -4px 4px 20px rgba(0,0,0,0.15),
-            0 0 0 1px rgba(0,0,0,0.05);
-        }
-        .book-back {
-          position: absolute;
-          width: 100%;
-          height: 100%;
-          background: linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%);
-          border-radius: 2px 12px 12px 2px;
-          box-shadow: 0 15px 50px rgba(0,0,0,0.2);
-        }
-        /* Page edge effect */
-        .book-page::after {
-          content: '';
-          position: absolute;
-          left: 0;
-          top: 0;
-          bottom: 0;
-          width: 3px;
-          background: linear-gradient(to right, #e2e8f0, transparent);
-        }
+        @keyframes heroReveal { 0% { transform: scale(0.9) translateY(20px); opacity: 0; } 100% { transform: scale(1) translateY(0); opacity: 1; } }
+        .hero-card { animation: heroReveal 0.5s ease-out forwards; }
 
-        /* ===== HERO CARD ===== */
-        @keyframes heroReveal {
-          0% { transform: scale(0.9) translateY(20px); opacity: 0; }
-          100% { transform: scale(1) translateY(0); opacity: 1; }
-        }
-        .hero-card {
-          animation: heroReveal 0.5s ease-out forwards;
-        }
+        @keyframes introReveal { 0% { transform: translateY(30px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+        .intro-card { animation: introReveal 0.5s ease-out forwards; }
 
-        /* ===== INTRO CARD ===== */
-        @keyframes introReveal {
-          0% { transform: translateY(30px); opacity: 0; }
-          100% { transform: translateY(0); opacity: 1; }
-        }
-        .intro-card {
-          animation: introReveal 0.5s ease-out forwards;
-        }
-
-        /* ===== SESSION CARD ===== */
-        @keyframes cardFlip {
-          0% { transform: rotateY(0deg); opacity: 1; }
-          50% { transform: rotateY(90deg); opacity: 0; }
-          51% { transform: rotateY(-90deg); opacity: 0; }
-          100% { transform: rotateY(0deg); opacity: 1; }
-        }
-        .session-card {
-          animation: cardAppear 0.4s ease-out forwards;
-        }
-        @keyframes cardAppear {
-          0% { transform: translateY(20px); opacity: 0; }
-          100% { transform: translateY(0); opacity: 1; }
-        }
-
-        /* ===== CALENDAR ===== */
-        @keyframes calendarSlide {
-          0% { transform: translateY(30px); opacity: 0; }
-          100% { transform: translateY(0); opacity: 1; }
-        }
-        @keyframes scanLine {
-          0% { top: 15%; }
-          100% { top: 85%; }
-        }
-        @keyframes calendarFly {
-          0% { transform: perspective(500px) rotateX(0) scale(1); opacity: 1; }
-          100% { transform: perspective(500px) rotateX(-40deg) translateY(-150px) scale(0.5); opacity: 0; }
-        }
+        @keyframes calendarSlide { 0% { transform: translateY(30px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+        @keyframes scanLine { 0% { top: 15%; } 100% { top: 85%; } }
+        @keyframes calendarFly { 0% { transform: perspective(500px) rotateX(0) scale(1); opacity: 1; } 100% { transform: perspective(500px) rotateX(-40deg) translateY(-150px) scale(0.5); opacity: 0; } }
         .calendar-slide { animation: calendarSlide 0.4s ease-out forwards; }
         .scan-line { animation: scanLine 1.5s ease-in-out infinite; }
         .calendar-fly { animation: calendarFly 0.6s ease-in forwards; }
 
-        /* ===== BLOCKS ===== */
-        @keyframes blockFloat {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-5px); }
-        }
-        @keyframes blockDrop {
-          0% { opacity: 1; }
-          100% { opacity: 0; transform: translateY(15px); }
-        }
-        @keyframes slotFill {
-          0% { transform: scale(0); }
-          60% { transform: scale(1.1); }
-          100% { transform: scale(1); }
-        }
+        @keyframes blockFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+        @keyframes blockDrop { 0% { opacity: 1; } 100% { opacity: 0; transform: translateY(15px); } }
+        @keyframes slotFill { 0% { transform: scale(0); } 60% { transform: scale(1.1); } 100% { transform: scale(1); } }
         .block-float { animation: blockFloat 1.5s ease-in-out infinite; }
         .block-drop { animation: blockDrop 0.25s ease-in forwards; }
         .slot-fill { animation: slotFill 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
 
-        /* ===== NOTIFICATION ===== */
-        @keyframes notifDrop {
-          0% { transform: translateY(-40px); opacity: 0; }
-          100% { transform: translateY(0); opacity: 1; }
-        }
+        @keyframes notifDrop { 0% { transform: translateY(-40px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
         .notif-drop { animation: notifDrop 0.4s ease-out forwards; }
 
-        /* ===== ON TRACK ===== */
-        @keyframes trackPop {
-          0% { transform: scale(0.8); opacity: 0; }
-          100% { transform: scale(1); opacity: 1; }
-        }
+        @keyframes trackPop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
         .track-pop { animation: trackPop 0.4s ease-out forwards; }
 
-        /* ===== CELEBRATION ===== */
-        @keyframes celebPop {
-          0% { transform: scale(0) rotate(-5deg); }
-          70% { transform: scale(1.05) rotate(2deg); }
-          100% { transform: scale(1) rotate(0); }
-        }
-        @keyframes confettiFall {
-          0% { transform: translateY(-50px) rotate(0); opacity: 1; }
-          100% { transform: translateY(350px) rotate(720deg); opacity: 0; }
-        }
+        @keyframes celebPop { 0% { transform: scale(0) rotate(-5deg); } 70% { transform: scale(1.05) rotate(2deg); } 100% { transform: scale(1) rotate(0); } }
+        @keyframes confettiFall { 0% { transform: translateY(-50px) rotate(0); opacity: 1; } 100% { transform: translateY(350px) rotate(720deg); opacity: 0; } }
         .celeb-pop { animation: celebPop 0.5s ease-out forwards; }
         .confetti { animation: confettiFall 2.5s ease-out forwards; }
 
-        /* ===== CTA ===== */
-        @keyframes ctaFade {
-          0% { opacity: 0; transform: translateY(15px); }
-          100% { opacity: 1; transform: translateY(0); }
-        }
-        .cta-fade { animation: ctaFade 0.4s ease-out forwards; }
-
-        /* ===== UTILITIES ===== */
-        @keyframes blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0; }
-        }
-        .cursor { animation: blink 0.8s step-end infinite; }
-        
-        .block-3d {
-          background: linear-gradient(145deg, #475569 0%, #1e293b 100%);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-          border-radius: 10px;
-        }
+        .block-3d { background: linear-gradient(145deg, #475569 0%, #1e293b 100%); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); border-radius: 10px; }
       `}</style>
 
-      {/* ===== INPUT (TOP) ===== */}
-      <div className="mb-4">
-        <div className="backdrop-blur-xl bg-white/80 border border-white/90 shadow-lg rounded-2xl p-2">
-          <div className="flex items-center gap-3">
-            <div className="flex-1 px-4 py-3">
-              <span className="text-slate-700 text-lg font-medium">
-                {phase === 'userResponse' ? responseTyped : typedText}
-              </span>
-              {(phase === 'typing' || phase === 'userResponse') && (
-                <span className="cursor inline-block w-0.5 h-6 bg-slate-700 ml-1" />
-              )}
-            </div>
-            <button className="p-3.5 bg-slate-800 rounded-xl text-white shadow-lg">
-              <Send className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ===== ANIMATION STAGE ===== */}
       <div className="flex-1 relative overflow-hidden">
         
-        {/* ----- LOADING ----- */}
         {phase === 'loading' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <div className="relative w-16 h-16">
@@ -653,13 +745,17 @@ function ScheduleSlotAnimation() {
           </div>
         )}
 
-        {/* ----- HERO CARD (Clean white/glass) ----- */}
         {phase === 'heroReveal' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-4">
             <div className="hero-card bg-white rounded-3xl p-8 shadow-xl border border-slate-100 w-full max-w-xs">
               <div className="text-center">
                 <div className="text-5xl mb-4">{goal.icon}</div>
-                <h2 className="text-lg font-semibold text-slate-800 mb-6">{goal.name}</h2>
+                <h2 className="text-lg font-semibold text-slate-800 mb-2">{goal.name}</h2>
+                
+                <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-sm font-medium mb-6">
+                  <Check className="w-4 h-4" />
+                  Done by {goal.finishDate}
+                </div>
                 
                 <div className="bg-slate-50 rounded-2xl p-6 mb-6">
                   <div className="text-5xl font-bold text-slate-800">{goal.months}</div>
@@ -685,17 +781,22 @@ function ScheduleSlotAnimation() {
           </div>
         )}
 
-        {/* ----- SESSIONS INTRO ----- */}
         {phase === 'sessionsIntro' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-4">
             <div className="intro-card bg-white rounded-3xl p-6 shadow-xl border border-slate-100 w-full max-w-sm text-center">
               <div className="text-5xl mb-3">{goal.icon}</div>
               <h3 className="text-lg font-bold text-slate-800 mb-1">{goal.name}</h3>
-              <p className="text-slate-500 text-sm mb-4">Your personalized training plan</p>
+              <p className="text-slate-500 text-sm mb-2">Your scheduled training plan</p>
+              
+              <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-medium mb-4">
+                <Check className="w-3 h-3" />
+                Complete by {goal.finishDate}
+              </div>
               
               <div className="grid grid-cols-4 gap-2 mb-4">
                 {goal.sessions.map((s, i) => (
-                  <div key={i} className="bg-slate-800 text-white rounded-xl py-3 px-1 shadow-lg">
+                  <div key={i} className="bg-slate-800 text-white rounded-xl py-2 px-1 shadow-lg">
+                    <p className="text-[8px] text-slate-400 mb-0.5">{['Mon', 'Wed', 'Fri', 'Sat'][i]}</p>
                     <span className="font-bold text-sm">{goal.mins}m</span>
                     <p className="text-[8px] text-slate-300 mt-0.5 leading-tight">{s.title}</p>
                   </div>
@@ -703,22 +804,26 @@ function ScheduleSlotAnimation() {
               </div>
               
               <p className="text-slate-600 text-sm">
-                <span className="font-semibold">4 detailed sessions</span> per week
+                <span className="font-semibold">4 scheduled sessions</span> per week
               </p>
               <p className="text-slate-400 text-xs mt-2">Each session includes warm-up, main work & cool-down</p>
             </div>
           </div>
         )}
 
-        {/* ----- TRAINING BOOK WITH REAL PAGE FLIPS ----- */}
         {phase === 'sessions' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-2">
-            <p className="text-slate-500 text-sm mb-4">Session {currentSession + 1} of 4</p>
+            <div className="text-center mb-4">
+              <div className="inline-flex items-center gap-2 bg-slate-800 text-white px-3 py-1.5 rounded-full text-sm font-medium mb-2">
+                <Calendar className="w-4 h-4" />
+                {['Monday 7:00 PM', 'Wednesday 7:00 PM', 'Friday 6:30 PM', 'Saturday 10:00 AM'][currentSession]}
+              </div>
+              <p className="text-slate-600 text-sm font-medium">Session {currentSession + 1} of 4</p>
+              <p className="text-emerald-600 text-xs mt-1">🎯 Goal complete by: {goal.finishDate}</p>
+            </div>
             
             <div className="book-wrapper">
-              {/* The book */}
               <div className="book-3d">
-                {/* All 4 pages stacked */}
                 {[0, 1, 2, 3].map((pageNum) => {
                   const isFlipped = pageNum < currentSession;
                   const session = goal.sessions[pageNum];
@@ -729,10 +834,8 @@ function ScheduleSlotAnimation() {
                       className={`book-page ${isFlipped ? 'flipped' : ''}`}
                       style={{ zIndex: 4 - pageNum }}
                     >
-                      {/* Front of page - the detailed content */}
                       <div className="page-front">
                         <div className="page-content">
-                          {/* Header */}
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-[10px] text-slate-400 uppercase tracking-widest">
                               Week {pageNum + 1}
@@ -743,16 +846,13 @@ function ScheduleSlotAnimation() {
                             </div>
                           </div>
                           
-                          {/* Title */}
                           <h3 className="text-xl font-bold text-slate-800 mb-3">{session.title}</h3>
                           
-                          {/* Warm-up */}
                           <div className="mb-3">
                             <p className="text-[9px] text-amber-600 uppercase tracking-wider font-semibold mb-1">🔥 Warm-up</p>
                             <p className="text-[11px] text-slate-600 leading-relaxed">{session.warmup}</p>
                           </div>
                           
-                          {/* Main Work */}
                           <div className="mb-3">
                             <p className="text-[9px] text-blue-600 uppercase tracking-wider font-semibold mb-1">💪 Main Work</p>
                             <ul className="text-[11px] text-slate-700 space-y-1">
@@ -765,7 +865,6 @@ function ScheduleSlotAnimation() {
                             </ul>
                           </div>
                           
-                          {/* Cool-down */}
                           <div>
                             <p className="text-[9px] text-emerald-600 uppercase tracking-wider font-semibold mb-1">🧘 Cool-down</p>
                             <p className="text-[11px] text-slate-600 leading-relaxed">{session.cooldown}</p>
@@ -773,7 +872,6 @@ function ScheduleSlotAnimation() {
                         </div>
                       </div>
                       
-                      {/* Back of page (shown when flipped) */}
                       <div className="page-back">
                         <div className="h-full flex items-center justify-center">
                           <div className="text-center">
@@ -787,7 +885,6 @@ function ScheduleSlotAnimation() {
                   );
                 })}
                 
-                {/* Book back cover */}
                 <div className="book-back">
                   <div className="h-full flex flex-col items-center justify-center text-center p-4">
                     <div className="text-5xl opacity-30 mb-3">{goal.icon}</div>
@@ -798,7 +895,6 @@ function ScheduleSlotAnimation() {
                 </div>
               </div>
               
-              {/* Page indicator dots */}
               <div className="flex justify-center gap-2 mt-5">
                 {[0, 1, 2, 3].map(i => (
                   <div 
@@ -817,10 +913,8 @@ function ScheduleSlotAnimation() {
           </div>
         )}
 
-        {/* ----- FINDING TIME + DROPPING + SCHEDULED ----- */}
         {['findingTime', 'dropping', 'scheduled'].includes(phase) && (
           <div className="absolute inset-0 flex flex-col items-center pt-4 px-4">
-            {/* Header */}
             <div className="text-center mb-3">
               <p className="text-slate-800 font-semibold">
                 {phase === 'findingTime' && 'Now let\'s find time in your week'}
@@ -829,7 +923,6 @@ function ScheduleSlotAnimation() {
               </p>
             </div>
 
-            {/* Floating blocks */}
             {(phase === 'findingTime' || phase === 'dropping') && (
               <div className="flex gap-2 mb-3">
                 {[0,1,2,3].map(i => {
@@ -851,7 +944,6 @@ function ScheduleSlotAnimation() {
               </div>
             )}
 
-            {/* Calendar */}
             <div className="calendar-slide bg-white rounded-2xl p-4 shadow-xl border border-slate-100 w-full max-w-md relative overflow-hidden">
               {phase === 'findingTime' && (
                 <div className="scan-line absolute left-0 right-0 h-0.5 bg-blue-400/60 z-10" />
@@ -883,7 +975,7 @@ function ScheduleSlotAnimation() {
                       const targetIdx = GRID_TARGETS.findIndex(([d, r]) => d === day && r === row);
                       const isTarget = targetIdx !== -1;
                       const isFilled = isTarget && targetIdx <= dropIndex;
-                      const isBusy = row === 0 && day < 5;
+                      const isBusy = !isTarget;
 
                       return (
                         <div
@@ -891,7 +983,6 @@ function ScheduleSlotAnimation() {
                           className={`h-8 rounded-lg flex items-center justify-center relative
                             ${isTarget && !isFilled ? 'bg-blue-50 border-2 border-dashed border-blue-200' : ''}
                             ${isBusy ? 'bg-slate-100' : ''}
-                            ${!isTarget && !isBusy ? 'bg-slate-50' : ''}
                           `}
                         >
                           {isBusy && <span className="text-slate-400 text-[7px]">busy</span>}
@@ -910,7 +1001,6 @@ function ScheduleSlotAnimation() {
           </div>
         )}
 
-        {/* ----- CALENDAR FLY ----- */}
         {phase === 'calendarFly' && (
           <div className="absolute inset-0 flex items-center justify-center px-4">
             <div className="calendar-fly bg-white rounded-xl p-3 shadow-lg w-full max-w-md text-center">
@@ -919,11 +1009,9 @@ function ScheduleSlotAnimation() {
           </div>
         )}
 
-        {/* ----- NOTIFICATION ----- */}
         {(phase === 'notification' || phase === 'userResponse') && (
           <div className="absolute inset-0 flex flex-col items-center pt-6 px-4">
             <div className="notif-drop w-full max-w-sm bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
-              {/* Header */}
               <div className="bg-slate-800 text-white px-4 py-2.5 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 bg-white rounded-lg flex items-center justify-center">
@@ -933,7 +1021,6 @@ function ScheduleSlotAnimation() {
                 </div>
                 <span className="text-slate-400 text-xs">Monday · 7:00 PM</span>
               </div>
-              {/* Body */}
               <div className="p-4">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center flex-shrink-0">
@@ -962,7 +1049,6 @@ function ScheduleSlotAnimation() {
           </div>
         )}
 
-        {/* ----- ON TRACK ----- */}
         {phase === 'onTrack' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-4">
             <div className="track-pop bg-white rounded-3xl p-8 shadow-xl border border-slate-100 w-full max-w-xs text-center">
@@ -970,7 +1056,7 @@ function ScheduleSlotAnimation() {
                 <Check className="w-8 h-8 text-emerald-600" />
               </div>
               <h3 className="text-xl font-bold text-slate-800">Nice work! 🎉</h3>
-              <p className="text-slate-500 text-sm mt-2">You're on track to finish</p>
+              <p className="text-slate-500 text-sm mt-2">You&apos;re on track to finish</p>
               <p className="text-slate-800 font-semibold">{goal.name}</p>
               <p className="text-sm text-slate-400 mt-1">by</p>
               <p className="text-xl font-bold text-emerald-600 mt-1">{goal.finishDate}</p>
@@ -978,7 +1064,6 @@ function ScheduleSlotAnimation() {
           </div>
         )}
 
-        {/* ----- CELEBRATION ----- */}
         {phase === 'celebration' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center overflow-hidden px-4">
             {confetti.map(c => (
@@ -1016,22 +1101,20 @@ function ScheduleSlotAnimation() {
           </div>
         )}
 
-        {/* ----- CTA ----- */}
-        {phase === 'cta' && (
+        {phase === 'restart' && (
           <div className="absolute inset-0 flex items-center justify-center px-4">
-            <Link
-              href="/signup"
-              className="cta-fade inline-flex items-center gap-2 px-8 py-4 bg-slate-800 hover:bg-slate-700 rounded-2xl text-white font-semibold shadow-xl transition-all hover:scale-105"
-            >
-              Try with your goal
-              <ArrowRight className="w-5 h-5" />
-            </Link>
+            <p className="text-slate-400 text-sm">Loading next example...</p>
           </div>
         )}
       </div>
     </div>
   );
 }
+
+// ============================================================
+// LOGGED IN HOME
+// ============================================================
+
 function LoggedInHome() {
   const { profile } = useAuth();
   const [feedItems, setFeedItems] = useState<FeedItemType[]>(generateFeedItems());
@@ -1080,7 +1163,7 @@ function LoggedInHome() {
                 <Target className="w-5 h-5 text-slate-600" />
               </div>
               <div>
-                <p className="font-semibold text-slate-700">Today's Progress</p>
+                <p className="font-semibold text-slate-700">Today&apos;s Progress</p>
                 <p className="text-sm text-slate-400">2 of 5 sessions</p>
               </div>
             </div>
@@ -1138,7 +1221,18 @@ function SimpleFeedCard({ item, onLike }: { item: FeedItemType; onLike: (id: num
             <span className="text-slate-400 text-sm">· {item.timeAgo}</span>
           </div>
           <p className="mt-1.5 text-slate-600 text-sm leading-relaxed">{item.content}</p>
-          <div className="mt-2 flex items-center gap-4">
+          
+          {item.image && (
+            <div className="mt-3 rounded-2xl overflow-hidden">
+              <img 
+                src={item.image} 
+                alt="" 
+                className="w-full h-48 object-cover"
+              />
+            </div>
+          )}
+          
+          <div className="mt-3 flex items-center gap-4">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100/80 rounded-full text-xs font-medium text-slate-500">
               {categoryIcons[item.category] || '🎯'} {item.goal}
               {item.streak && <Flame className="w-3 h-3 text-orange-500" />}
@@ -1162,7 +1256,128 @@ function SimpleFeedCard({ item, onLike }: { item: FeedItemType; onLike: (id: num
 // ============================================================
 
 function LandingPage() {
+  const router = useRouter();
+  const inputRef = useRef<HTMLInputElement>(null);
+  
+  const [demoGoalIndex, setDemoGoalIndex] = useState(0);
+  const [demoTypedText, setDemoTypedText] = useState('');
+  const [isDemoTyping, setIsDemoTyping] = useState(true);
+  
+  const [userInput, setUserInput] = useState('');
+  const [userHasFocused, setUserHasFocused] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [preview, setPreview] = useState<PreviewData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  
   const [feedItems, setFeedItems] = useState<FeedItemType[]>(() => generateFeedItems());
+
+  useEffect(() => {
+    if (!isDemoTyping || userHasFocused) return;
+    
+    const currentGoal = DEMO_GOALS[demoGoalIndex];
+    
+    if (demoTypedText.length < currentGoal.length) {
+      const t = setTimeout(() => {
+        setDemoTypedText(currentGoal.slice(0, demoTypedText.length + 1));
+      }, 100);
+      return () => clearTimeout(t);
+    }
+  }, [isDemoTyping, demoTypedText, demoGoalIndex, userHasFocused]);
+
+  const handleAnimationCycleComplete = () => {
+    if (!userHasFocused) {
+      setDemoGoalIndex(prev => (prev + 1) % DEMO_GOALS.length);
+      setDemoTypedText('');
+    }
+  };
+
+  const handleFocus = () => {
+    if (!userHasFocused) {
+      setUserHasFocused(true);
+      setIsDemoTyping(false);
+      setUserInput('');
+    }
+  };
+
+  const displayValue = userHasFocused ? userInput : demoTypedText;
+
+  const validateInput = (input: string): { valid: boolean; error?: string } => {
+    const trimmed = input.trim();
+    if (trimmed.length < MIN_GOAL_LENGTH) {
+      return { valid: false, error: 'Please enter a more descriptive goal.' };
+    }
+    if (trimmed.length > MAX_GOAL_LENGTH) {
+      return { valid: false, error: `Goal must be under ${MAX_GOAL_LENGTH} characters.` };
+    }
+    return { valid: true };
+  };
+
+  const handleSubmit = async () => {
+    const inputToSubmit = userHasFocused ? userInput : demoTypedText;
+    if (!inputToSubmit.trim() || isLoading) return;
+    
+    const validation = validateInput(inputToSubmit);
+    if (!validation.valid) {
+      setError(validation.error || 'Invalid input');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/goals/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal_name: inputToSubmit.trim() }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        if (data.blocked) {
+          setError(data.error || "Can't help with that — try a different goal.");
+        } else {
+          setError(data.error || 'Failed to generate preview');
+        }
+        return;
+      }
+      
+      setPreview(data);
+      setUserHasFocused(true);
+    } catch (err) {
+      console.error('Preview error:', err);
+      setError('Something went wrong. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+
+  // ============================================================
+  // FIXED: Include preview in sessionStorage for onboarding
+  // ============================================================
+  const handleSignupClick = (schedule?: ScheduleSelection) => {
+    if (preview) {
+      // IMPORTANT: Include the preview with AI-generated sessions!
+      sessionStorage.setItem('pendingGoal', JSON.stringify({
+        name: preview.goal.name,
+        category: preview.goal.category,
+        plan: preview.plan,
+        schedule: schedule,
+        // Pass the preview so onboarding can use the AI-generated sessions
+        preview: preview.preview,
+      }));
+      console.log('📦 Saved pendingGoal with preview:', preview.preview.week1.sessions.map(s => s.name));
+    }
+    router.push('/signup');
+  };
 
   const handleLike = (id: number) => {
     setFeedItems(prev => prev.map(item => 
@@ -1172,9 +1387,11 @@ function LandingPage() {
     ));
   };
 
+  const isInputValid = displayValue.trim().length >= MIN_GOAL_LENGTH && displayValue.trim().length <= MAX_GOAL_LENGTH;
+  const remainingChars = MAX_GOAL_LENGTH - displayValue.length;
+
   return (
     <div className="min-h-screen relative overflow-hidden">
-      {/* Background */}
       <div className="fixed inset-0 z-0">
         <div 
           className="absolute inset-0 bg-cover bg-bottom bg-no-repeat"
@@ -1184,7 +1401,6 @@ function LandingPage() {
       </div>
 
       <div className="relative z-10">
-        {/* Nav */}
         <nav className="flex items-center justify-between px-5 py-4 max-w-4xl mx-auto">
           <div className="flex items-center gap-2">
             <div className="w-10 h-10 backdrop-blur-xl bg-white/70 rounded-xl flex items-center justify-center border border-white/80 shadow-sm overflow-hidden relative">
@@ -1208,22 +1424,119 @@ function LandingPage() {
           </div>
         </nav>
 
-        {/* Hero Section */}
         <section className="px-4 pt-8 md:pt-12 pb-6 max-w-4xl mx-auto">
           <div className="text-center mb-8">
-            <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold leading-tight mb-3 text-slate-800">
-              Your time is limited.
+            <h1 className="text-2xl md:text-3xl lg:text-4xl font-semibold leading-snug mb-3 text-slate-800 max-w-2xl mx-auto">
+              Turn goals into scheduled sessions. Stay on track when life gets in the way.
             </h1>
-            <p className="text-lg md:text-xl text-slate-500 max-w-lg mx-auto">
-              Tell me what you want to achieve. I'll find where it fits in your week.
+            <p className="text-base text-slate-400 max-w-md mx-auto">
+              {preview ? 'Your personalized plan is ready.' : 'Most plans break when real life shows up.'}
             </p>
           </div>
 
-          {/* The Animation */}
-          <ScheduleSlotAnimation />
+          <div className="w-full max-w-xl mx-auto mb-6">
+            <p className="text-sm text-slate-500 mb-2 text-center font-medium">
+              {userHasFocused ? 'Enter your goal' : '✨ Try it yourself'}
+            </p>
+            
+            <GlassCard className="p-2" hover={false}>
+              <div className="flex items-center gap-3">
+                <div className="flex-1 px-4 py-3 relative">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={displayValue}
+                    onChange={(e) => {
+                      if (userHasFocused) {
+                        setUserInput(e.target.value);
+                        setError(null);
+                      }
+                    }}
+                    onFocus={handleFocus}
+                    onKeyDown={handleKeyDown}
+                    placeholder={userHasFocused ? "Type a goal you want to achieve..." : ""}
+                    maxLength={MAX_GOAL_LENGTH}
+                    className="w-full bg-transparent text-slate-700 text-lg font-medium placeholder:text-slate-400 outline-none"
+                    disabled={isLoading}
+                  />
+                  {!userHasFocused && isDemoTyping && demoTypedText.length < DEMO_GOALS[demoGoalIndex].length && (
+                    <span className="inline-block w-0.5 h-6 bg-slate-700 ml-0.5 animate-pulse" />
+                  )}
+                </div>
+                <button 
+                  onClick={handleSubmit}
+                  disabled={!isInputValid || isLoading}
+                  className="px-4 py-3 bg-slate-800 rounded-xl text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-700 transition-all flex items-center gap-2 font-medium whitespace-nowrap"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="hidden sm:inline">Generating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Get my plan</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </GlassCard>
+            
+            <div className="flex items-center justify-between mt-2 px-1">
+              <p className="text-xs text-slate-400">
+                {userHasFocused ? 'Real goals work best (fitness, skills, projects)' : 'Click to enter your own goal'}
+              </p>
+              {userHasFocused && userInput.length > 0 && (
+                <p className={`text-xs ${remainingChars < 20 ? 'text-amber-500' : 'text-slate-400'}`}>
+                  {remainingChars} left
+                </p>
+              )}
+            </div>
+            
+            {error && (
+              <p className="text-red-500 text-sm mt-2 text-center">{error}</p>
+            )}
+          </div>
+
+          {preview ? (
+            <div className="w-full max-w-xl mx-auto">
+              <PlanPreviewDisplay preview={preview} onSignup={handleSignupClick} />
+            </div>
+          ) : (
+            <>
+              <div className="w-full max-w-xl mx-auto">
+                <ScheduleAnimation 
+                  currentGoalIndex={demoGoalIndex} 
+                  onCycleComplete={handleAnimationCycleComplete}
+                />
+              </div>
+              
+              {!userHasFocused && (
+                <div className="text-center mt-4">
+                  <p className="text-sm text-slate-400 mb-3">Or try:</p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {['Learn guitar', 'Run a 5K', 'Learn Spanish', 'Read more books'].map((example) => (
+                      <button
+                        key={example}
+                        onClick={() => {
+                          setUserHasFocused(true);
+                          setIsDemoTyping(false);
+                          setUserInput(example);
+                          inputRef.current?.focus();
+                        }}
+                        className="px-3 py-1.5 bg-white/50 hover:bg-white/70 border border-slate-200 rounded-full text-sm text-slate-600 transition-colors"
+                      >
+                        {example}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </section>
 
-        {/* Value Props */}
         <section className="px-4 py-12">
           <div className="max-w-3xl mx-auto">
             <div className="grid md:grid-cols-3 gap-4">
@@ -1254,7 +1567,6 @@ function LandingPage() {
           </div>
         </section>
 
-        {/* Social Proof */}
         <section className="px-4 py-8">
           <div className="max-w-xl mx-auto">
             <p className="text-center text-sm text-slate-400 mb-4">People making progress</p>
@@ -1266,7 +1578,6 @@ function LandingPage() {
           </div>
         </section>
 
-        {/* Final CTA */}
         <section className="px-4 py-12">
           <div className="max-w-md mx-auto text-center">
             <Link 

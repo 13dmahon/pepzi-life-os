@@ -129,6 +129,34 @@ ONE question per message maximum.
 ALWAYS include the timeline when proposing hours.`;
 
 // ============================================================
+// SAFETY CHECK FOR GOALS
+// ============================================================
+
+const BLOCKED_PATTERNS = [
+  /\b(kill|murder|assault|attack|punch|hit|hurt|harm|stab|shoot|beat|fight|strangle|poison)\b/i,
+  /\b(violence|violent|weapon|gun|knife|bomb)\b/i,
+  /\b(drug|drugs|cocaine|heroin|meth|marijuana|weed|steal|theft|rob|hack|fraud)\b/i,
+  /\b(illegal|crime|criminal|smuggle|traffic|launder)\b/i,
+  /\b(suicide|self.?harm|cut myself|kill myself|end my life)\b/i,
+  /\b(hate|racist|sexist|discriminat|supremacy|nazi)\b/i,
+  /\b(porn|sex|nude|naked|nsfw|xxx)\b/i,
+  /\b(stalk|harass|bully|threaten|intimidate|blackmail|revenge)\b/i,
+  /\b(bomb|explosive|terrorist|terrorism|extremis)\b/i,
+  /\b(scam|phishing|catfish|pyramid scheme|ponzi)\b/i,
+];
+
+function isGoalSafe(goalName: string): { safe: boolean; reason?: string } {
+  const lower = goalName.toLowerCase().trim();
+  for (const pattern of BLOCKED_PATTERNS) {
+    if (pattern.test(lower)) {
+      return { safe: false, reason: 'This goal contains content that violates our guidelines.' };
+    }
+  }
+  if (lower.length < 3) return { safe: false, reason: 'Please enter a more descriptive goal.' };
+  if (lower.length > 200) return { safe: false, reason: 'Please enter a shorter goal description.' };
+  return { safe: true };
+}
+// ============================================================
 // HELPER: Parse time string
 // ============================================================
 
@@ -2129,6 +2157,139 @@ Return valid JSON only:
 // ============================================================
 // ROUTES
 // ============================================================
+// ============================================================
+// PUBLIC PREVIEW ENDPOINT (NO AUTH REQUIRED)
+// ============================================================
+
+
+router.post('/preview', async (req: Request, res: Response) => {
+  try {
+    const { goal_name } = req.body;
+
+    if (!goal_name || goal_name.trim().length < 2) {
+      return res.status(400).json({
+        error: 'Please enter a goal',
+      });
+    }
+
+    // SAFETY CHECK
+    const safetyCheck = isGoalSafe(goal_name);
+    if (!safetyCheck.safe) {
+      console.log(`🚫 Blocked unsafe goal: "${goal_name}"`);
+      return res.status(400).json({
+        error: safetyCheck.reason || 'This goal cannot be processed.',
+        blocked: true,
+      });
+    }
+
+    console.log(`🎯 Generating preview for: "${goal_name}"`);
+
+    const category = extractCategory(goal_name) || 'skill';
+    const hourEstimate = getHourEstimate(goal_name, category, 'beginner');
+    const sessionRec = getSessionLengthRecommendation(goal_name, category);
+    
+    const weeklyHours = hourEstimate.weekly_hours_recommended;
+    const sessionLength = sessionRec.recommended_mins;
+    const sessionsPerWeek = Math.min(6, Math.ceil((weeklyHours * 60) / sessionLength));
+    const totalWeeks = hourEstimate.typical_weeks;
+    const totalHours = Math.round(weeklyHours * totalWeeks);
+
+    const prompt = `Create Week 1 training sessions for this goal.
+
+GOAL: "${goal_name}"
+SESSIONS THIS WEEK: ${sessionsPerWeek}
+SESSION LENGTH: ~${sessionLength} minutes each
+
+This is the FOUNDATION week - focus on basics, setup, and getting started.
+
+CRITICAL: Create SPECIFIC, ACTIONABLE sessions for this exact goal. Not generic.
+
+Return valid JSON only:
+{
+  "week1": {
+    "week_number": 1,
+    "focus": "Foundation phase focus description",
+    "sessions": [
+      {
+        "name": "Specific session name",
+        "description": "What exactly to do in this session",
+        "duration_mins": ${sessionLength},
+        "notes": "Pro tip for this session"
+      }
+    ]
+  }
+}`;
+
+    let week1Preview;
+    
+    try {
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an elite coach creating specific, actionable training sessions. Never use generic names like "Session 1". Create tasks specific to the exact goal.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 1500,
+        response_format: { type: "json_object" }
+      });
+
+      const content = response.choices[0]?.message?.content || '{}';
+      const parsed = JSON.parse(content);
+      
+      if (parsed.week1?.sessions?.length > 0) {
+        week1Preview = parsed.week1;
+      }
+    } catch (aiError: any) {
+      console.error('AI preview generation failed:', aiError.message);
+    }
+
+    if (!week1Preview) {
+      week1Preview = {
+        week_number: 1,
+        focus: 'Foundation & Getting Started',
+        sessions: Array.from({ length: sessionsPerWeek }, (_, i) => ({
+          name: `${goal_name} - Foundation Session ${i + 1}`,
+          description: `Start building your foundation for ${goal_name}`,
+          duration_mins: sessionLength,
+          notes: 'Focus on form and consistency',
+        })),
+      };
+    }
+
+    return res.json({
+      goal: {
+        name: goal_name,
+        category,
+      },
+      plan: {
+        weekly_hours: weeklyHours,
+        sessions_per_week: sessionsPerWeek,
+        session_length_mins: sessionLength,
+        total_weeks: totalWeeks,
+        total_hours: totalHours,
+      },
+      preview: {
+        week1: week1Preview,
+        locked_weeks: totalWeeks - 1,
+      },
+      reasoning: {
+        session_length_reason: sessionRec.reasoning,
+        hour_estimate_notes: hourEstimate.notes,
+      },
+    });
+
+  } catch (error: any) {
+    console.error('❌ Preview generation error:', error);
+    return res.status(500).json({
+      error: 'Failed to generate preview',
+      message: error.message,
+    });
+  }
+});
 
 router.post('/from-dreams', async (req: Request, res: Response) => {
   try {
@@ -2753,9 +2914,18 @@ RESPOND WITH JSON:
     });
   }
 });
+
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { user_id, name, category, target_date, description, success_condition } = req.body;
+    const { 
+      user_id, 
+      name, 
+      category, 
+      target_date, 
+      description, 
+      success_condition,
+      client_request_id  // IdempotentWrite_v1
+    } = req.body;
 
     if (!user_id || !name || !category) {
       return res.status(400).json({
@@ -2764,6 +2934,65 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
+    // IdempotentWrite_v1: If client_request_id provided, use upsert to handle retries
+    if (client_request_id) {
+      console.log(`🔐 IdempotentWrite_v1: Creating goal with request_id ${client_request_id}`);
+      
+      // First check if goal already exists with this request_id
+      const { data: existingGoal } = await supabase
+        .from('goals')
+        .select('*')
+        .eq('user_id', user_id)
+        .eq('client_request_id', client_request_id)
+        .single();
+      
+      if (existingGoal) {
+        console.log(`✅ IdempotentWrite_v1: Returning existing goal ${existingGoal.id} (retry detected)`);
+        return res.json({ goal: existingGoal, message: 'Goal already exists (retry)', idempotent_hit: true });
+      }
+      
+      // Create new goal with client_request_id
+      const { data: goal, error } = await supabase
+        .from('goals')
+        .insert({
+          user_id,
+          name,
+          category,
+          target_date: target_date || null,
+          status: 'active',
+          client_request_id,  // IdempotentWrite_v1
+          plan: {
+            description: description || '',
+            success_condition: success_condition || '',
+            created_at: new Date().toISOString(),
+          },
+        })
+        .select()
+        .single();
+
+      if (error) {
+        // Handle unique constraint violation gracefully
+        if (error.code === '23505') {
+          console.log(`⚠️ IdempotentWrite_v1: Unique constraint hit, fetching existing goal`);
+          const { data: existingGoal } = await supabase
+            .from('goals')
+            .select('*')
+            .eq('user_id', user_id)
+            .eq('client_request_id', client_request_id)
+            .single();
+          
+          if (existingGoal) {
+            return res.json({ goal: existingGoal, message: 'Goal already exists (constraint)', idempotent_hit: true });
+          }
+        }
+        throw error;
+      }
+
+      console.log(`✅ Created goal: ${name} (with idempotency key)`);
+      return res.json({ goal, message: 'Goal created successfully' });
+    }
+
+    // Fallback: Original behavior without idempotency (for backward compatibility)
     const { data: goal, error } = await supabase
       .from('goals')
       .insert({
@@ -2784,20 +3013,40 @@ router.post('/', async (req: Request, res: Response) => {
     if (error) throw error;
 
     console.log(`✅ Created goal: ${name}`);
-
     return res.json({ goal, message: 'Goal created successfully' });
+    
   } catch (error: any) {
     console.error('❌ Goal creation error:', error);
     return res.status(500).json({ error: 'Failed to create goal', message: error.message });
   }
 });
 
+// ============================================================
+// UPDATED: /:goalId/create-plan-with-milestones endpoint
+// Replace your existing endpoint with this one
+// ============================================================
+
 router.post('/:goalId/create-plan-with-milestones', async (req: Request, res: Response) => {
   try {
     const { goalId } = req.params;
-    const { milestones, weekly_hours, sessions_per_week, session_length_mins, total_hours, plan_edits, placed_sessions, preview } = req.body;
+    const { 
+      milestones, 
+      weekly_hours, 
+      sessions_per_week, 
+      session_length_mins, 
+      total_hours, 
+      plan_edits, 
+      placed_sessions, 
+      preview,
+      // NEW: Simple sessions mode
+      simple_sessions,
+      total_sessions,
+      preferred_days,
+      preferred_time,
+    } = req.body;
 
     console.log(`📋 Creating plan for goal ${goalId}: ${weekly_hours}h/week, ${sessions_per_week} sessions`);
+    console.log(`📋 Simple sessions mode: ${simple_sessions}, Total sessions: ${total_sessions}`);
 
     const { data: goal, error: goalError } = await supabase
       .from('goals')
@@ -2814,10 +3063,288 @@ router.post('/:goalId/create-plan-with-milestones', async (req: Request, res: Re
     const baseTotal = Number(total_hours) || 50;
     const baseSessions = Math.min(Number(sessions_per_week) || 3, 7);
     const baseSessionLength = Number(session_length_mins) || 60;
-    const totalWeeks = Math.max(1, Math.ceil(baseTotal / baseWeekly));
     const safeMilestones: any[] = Array.isArray(milestones) ? milestones : [];
 
-    console.log(`📊 Plan: ${totalWeeks} weeks, ${baseSessions} sessions/week @ ${baseSessionLength}min`);
+    // ============================================================
+    // SIMPLE SESSIONS MODE - Skip AI, create generic sessions
+    // ============================================================
+    if (simple_sessions === true && total_sessions) {
+      console.log(`⚡ SIMPLE SESSIONS MODE: Creating ${total_sessions} generic sessions`);
+      
+      const totalSessionCount = Number(total_sessions);
+      const totalWeeks = Math.max(1, Math.ceil(totalSessionCount / baseSessions));
+      
+      // Create simple plan structure
+      const plan: any = {
+        weekly_hours: baseWeekly,
+        sessions_per_week: baseSessions,
+        session_length_mins: baseSessionLength,
+        total_estimated_hours: Math.round((totalSessionCount * baseSessionLength) / 60),
+        total_weeks: totalWeeks,
+        total_sessions: totalSessionCount,
+        micro_goals: safeMilestones,
+        created_at: new Date().toISOString(),
+        custom: true,
+        simple_sessions: true,
+      };
+
+      // Generate simple weekly plan with "Session 1", "Session 2", etc.
+      const simpleWeeks: any[] = [];
+      let sessionCounter = 1;
+      
+      for (let week = 1; week <= totalWeeks && sessionCounter <= totalSessionCount; week++) {
+        const weekSessions: any[] = [];
+        
+        for (let s = 0; s < baseSessions && sessionCounter <= totalSessionCount; s++) {
+          weekSessions.push({
+            name: `Session ${sessionCounter}`,
+            description: 'Follow your training plan',
+            duration_mins: baseSessionLength,
+            notes: sessionCounter === 1 
+              ? 'First session - focus on getting started!' 
+              : sessionCounter === totalSessionCount 
+                ? 'Final session - you made it!' 
+                : 'Keep up the great work!',
+            tip: '',
+          });
+          sessionCounter++;
+        }
+        
+        // Determine phase focus
+        const progressPercent = week / totalWeeks;
+        let focus = 'Training';
+        let phase = 'development';
+        if (progressPercent <= 0.25) {
+          focus = 'Foundation Building';
+          phase = 'foundation';
+        } else if (progressPercent <= 0.5) {
+          focus = 'Development Phase';
+          phase = 'development';
+        } else if (progressPercent <= 0.75) {
+          focus = 'Advanced Training';
+          phase = 'development';
+        } else {
+          focus = 'Peak Performance';
+          phase = 'peak';
+        }
+        
+        simpleWeeks.push({
+          week,
+          week_number: week,
+          focus,
+          phase,
+          sessions: weekSessions,
+        });
+      }
+      
+      plan.weekly_plan = {
+        summary: `${totalSessionCount}-session plan for ${goal.name}`,
+        realism_notes: 'Simple sessions - follow your external training plan',
+        weeks: simpleWeeks,
+        milestones: safeMilestones.map((m: any, i: number) => ({
+          name: m.name,
+          target_week: m.week || m.target_week || Math.round(((i + 1) * totalWeeks) / Math.max(safeMilestones.length, 1)),
+          criteria: m.criteria || 'Complete this milestone',
+        })),
+      };
+
+      console.log(`✅ Simple plan created: ${totalSessionCount} sessions over ${totalWeeks} weeks`);
+
+      // Save plan to goal
+      const goalUpdates: any = { 
+        plan,
+        updated_at: new Date().toISOString(),
+      };
+      
+      // Also save preferred days/time if provided
+      if (preferred_days) goalUpdates.preferred_days = preferred_days;
+      if (preferred_time) goalUpdates.preferred_time = preferred_time;
+
+      const { error: updateError } = await supabase
+        .from('goals')
+        .update(goalUpdates)
+        .eq('id', goalId);
+
+      if (updateError) {
+        console.error('❌ Failed to save simple plan:', updateError);
+        throw updateError;
+      }
+
+      // Insert milestones if any
+      if (safeMilestones.length > 0) {
+        const microGoalsToInsert = safeMilestones.map((mg: any, index: number) => ({
+          goal_id: goalId,
+          name: mg.name || `Milestone ${index + 1}`,
+          order_index: index + 1,
+          completion_criteria: {
+            type: 'performance',
+            description: mg.criteria || 'Complete milestone',
+            target_week: mg.week || mg.target_week || null,
+          },
+        }));
+        
+        await supabase.from('micro_goals').delete().eq('goal_id', goalId);
+        await supabase.from('micro_goals').insert(microGoalsToInsert);
+      }
+
+// ============================================================
+// PASTE THIS CODE in backend/routes/goals.ts
+// Inside the "if (simple_sessions === true)" block
+// REPLACE the line: if (placed_sessions && placed_sessions.length > 0) {
+// WITH all of this code:
+// ============================================================
+// ============================================================
+     // ============================================================
+// GOALS.TS - COPY AND PASTE THIS
+// ============================================================
+// 
+// FIND THIS LINE (around line 850):
+//     let effectivePlacedSessions = placed_sessions;
+//
+// SELECT FROM THAT LINE DOWN TO (but not including):
+//     // Return success
+//     return res.json({
+//
+// REPLACE WITH EVERYTHING BELOW:
+// ============================================================
+
+      let effectivePlacedSessions = placed_sessions;
+      
+      if (!effectivePlacedSessions || effectivePlacedSessions.length === 0) {
+        console.log('⚡ No placed_sessions provided, auto-generating schedule...');
+        
+        const allDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+        const daysToUse = preferred_days?.length > 0 
+          ? preferred_days.map((d: string) => d.toLowerCase())
+          : allDays.slice(0, Math.min(baseSessions, 5));
+        
+        const hourMap: Record<string, number> = {
+          morning: 8,
+          afternoon: 14,
+          evening: 18,
+          any: 9,
+        };
+        const baseHour = hourMap[preferred_time || 'any'] || 9;
+        
+        // Sort days by day-of-week for consistent ordering
+        const dayOrder: Record<string, number> = {
+          'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3,
+          'thursday': 4, 'friday': 5, 'saturday': 6
+        };
+        const sortedDays = [...daysToUse].sort((a, b) => dayOrder[a] - dayOrder[b]);
+        
+        // Generate ONE placement per session per week
+        effectivePlacedSessions = [];
+        for (let i = 0; i < baseSessions; i++) {
+          const dayIndex = i % sortedDays.length;
+          const sessionsOnThisDay = effectivePlacedSessions.filter(
+            (p: any) => p.day === sortedDays[dayIndex]
+          ).length;
+          
+          effectivePlacedSessions.push({
+            day: sortedDays[dayIndex],
+            hour: baseHour + (sessionsOnThisDay * 3), // 3 hour gap if multiple on same day
+            minute: 0,
+            duration_mins: baseSessionLength,
+          });
+        }
+        
+        console.log(`✅ Auto-generated ${effectivePlacedSessions.length} weekly placements across ${sortedDays.length} days`);
+      }
+
+      // Generate schedule blocks - properly distributed across weeks
+      if (effectivePlacedSessions && effectivePlacedSessions.length > 0) {
+        console.log(`📅 Generating ${totalSessionCount} schedule blocks`);
+        
+        const dayMap: Record<string, number> = {
+          'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3,
+          'thursday': 4, 'friday': 5, 'saturday': 6
+        };
+        
+        // Sort placements by day order for consistent week-by-week scheduling
+        const sortedPlacements = [...effectivePlacedSessions].sort((a: any, b: any) => 
+          dayMap[a.day.toLowerCase()] - dayMap[b.day.toLowerCase()]
+        );
+        
+        const blocks: any[] = [];
+        let sessionNum = 1;
+        let weekOffset = 0;
+        
+        // Get start of current week (Sunday)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const startOfWeek = new Date(today);
+        startOfWeek.setDate(today.getDate() - today.getDay());
+        
+        // Generate sessions week by week
+        while (sessionNum <= totalSessionCount && weekOffset < 200) {
+          for (const placement of sortedPlacements) {
+            if (sessionNum > totalSessionCount) break;
+            
+            const targetDay = dayMap[placement.day.toLowerCase()];
+            
+            // Calculate the date for this session
+            const sessionDate = new Date(startOfWeek);
+            sessionDate.setDate(startOfWeek.getDate() + (weekOffset * 7) + targetDay);
+            sessionDate.setHours(placement.hour || 9, placement.minute || 0, 0, 0);
+            
+            // Only schedule if in the future
+            if (sessionDate > new Date()) {
+              blocks.push({
+                goal_id: goalId,
+                user_id: goal.user_id,
+                type: 'training',
+                scheduled_start: sessionDate.toISOString(),
+                duration_mins: placement.duration_mins || baseSessionLength,
+                status: 'scheduled',
+                notes: `Session ${sessionNum}|||Follow your training plan|||`,
+              });
+              
+              sessionNum++;
+            }
+          }
+          weekOffset++;
+        }
+        
+        if (blocks.length > 0) {
+          console.log(`📅 Inserting ${blocks.length} schedule blocks...`);
+          
+          // Delete any existing blocks for this goal
+          await supabase.from('schedule_blocks').delete().eq('goal_id', goalId);
+          
+          // Insert in batches
+          const batchSize = 100;
+          for (let i = 0; i < blocks.length; i += batchSize) {
+            const batch = blocks.slice(i, i + batchSize);
+            const { error: blockError } = await supabase.from('schedule_blocks').insert(batch);
+            if (blockError) {
+              console.error(`❌ Batch ${i / batchSize + 1} failed:`, blockError);
+            }
+          }
+          
+          console.log(`✅ Created ${blocks.length} schedule blocks across ${weekOffset} weeks`);
+        }
+      }  
+
+      // Return success
+      return res.json({
+        success: true,
+        plan,
+        schedule: {
+          blocksCreated: total_sessions,
+          message: `Created ${total_sessions} simple sessions`,
+        },
+        message: `Created ${totalSessionCount}-session training plan over ${totalWeeks} weeks`,
+      });
+    }
+
+    // ============================================================
+    // NORMAL AI-GENERATED PLAN (existing code)
+    // ============================================================
+    
+    const totalWeeks = Math.max(1, Math.ceil(baseTotal / baseWeekly));
+
+    console.log(`📊 AI Plan: ${totalWeeks} weeks, ${baseSessions} sessions/week @ ${baseSessionLength}min`);
 
     const plan: any = {
       weekly_hours: baseWeekly,
@@ -2831,6 +3358,195 @@ router.post('/:goalId/create-plan-with-milestones', async (req: Request, res: Re
     };
 
     // ALWAYS use AI to generate unique sessions for EVERY week
+// ============================================================
+    // CHECK FOR APPROVED PREVIEW FIRST
+    // ============================================================
+    const hasValidDetailedPreview = preview?.week1?.sessions?.length > 0 &&
+      !String(preview.week1.sessions?.[0]?.name || '').match(/^(Session \d+|Training Session|[^-]+ - Session \d+)$/i);
+
+    if (hasValidDetailedPreview) {
+      // ✅ USE APPROVED PREVIEW - User already approved these sessions!
+      console.log('✅ Using approved preview sessions from frontend');
+      console.log('   Week 1 first session:', preview.week1.sessions[0]?.name);
+      
+      const midWeekNum = Math.ceil(totalWeeks / 2);
+      
+      // Helper to normalize preview week format
+      const normalizePreviewWeek = (w: any, weekNumber: number, defaultFocus: string) => ({
+        week: weekNumber,
+        week_number: weekNumber,
+        focus: w?.focus || defaultFocus,
+        phase: weekNumber <= Math.ceil(totalWeeks * 0.3) ? 'foundation' 
+             : weekNumber <= Math.ceil(totalWeeks * 0.7) ? 'development' 
+             : 'peak',
+        sessions: (w?.sessions || []).map((s: any) => ({
+          name: s.name,
+          description: s.description || '',
+          duration_mins: s.duration_mins || baseSessionLength,
+          notes: s.notes || s.tip || '',
+          tip: s.notes || s.tip || '',
+        })),
+      });
+
+      // Build all weeks
+      const allWeeks: any[] = [];
+      
+      for (let w = 1; w <= totalWeeks; w++) {
+        if (w === 1 && preview.week1?.sessions?.length) {
+          allWeeks.push(normalizePreviewWeek(preview.week1, 1, 'Foundation'));
+        } else if (w === midWeekNum && preview.midWeek?.sessions?.length) {
+          allWeeks.push(normalizePreviewWeek(preview.midWeek, midWeekNum, 'Development'));
+        } else if (w === totalWeeks && preview.finalWeek?.sessions?.length) {
+          allWeeks.push(normalizePreviewWeek(preview.finalWeek, totalWeeks, 'Peak Performance'));
+        } else {
+          // Other weeks - interpolate from nearest preview week
+          const phase = w <= Math.ceil(totalWeeks * 0.3) ? 'foundation' 
+                      : w <= Math.ceil(totalWeeks * 0.7) ? 'development' 
+                      : 'peak';
+          
+          let templateWeek = preview.week1;
+          if (w > midWeekNum) {
+            templateWeek = preview.finalWeek || preview.midWeek || preview.week1;
+          } else if (w > Math.ceil(totalWeeks * 0.3)) {
+            templateWeek = preview.midWeek || preview.week1;
+          }
+          
+          allWeeks.push({
+            week: w,
+            week_number: w,
+            focus: templateWeek?.focus || `Week ${w} - ${phase.charAt(0).toUpperCase() + phase.slice(1)}`,
+            phase,
+            sessions: (templateWeek?.sessions || []).map((s: any) => ({
+              name: s.name,
+              description: s.description || 'Continue building on your progress',
+              duration_mins: s.duration_mins || baseSessionLength,
+              notes: s.notes || '',
+              tip: s.tip || s.notes || '',
+            })),
+          });
+        }
+      }
+      
+      plan.weekly_plan = {
+        summary: `${totalWeeks}-week plan for ${goal.name}`,
+        realism_notes: 'Plan uses your approved session structure.',
+        weeks: allWeeks,
+        milestones: safeMilestones.map((m: any, i: number) => ({
+          name: m.name,
+          target_week: m.week || m.target_week || Math.round(((i + 1) * totalWeeks) / Math.max(safeMilestones.length, 1)),
+          criteria: m.criteria || 'Complete this milestone',
+        })),
+      };
+      
+      console.log(`✅ Built plan from approved preview: ${allWeeks.length} weeks`);
+      
+    } else {
+      // 🤖 NO VALID PREVIEW - Generate with AI
+      console.log('🤖 No approved preview, generating full AI plan...');
+      
+      try {
+        const fullPlan = await generateFullWeeklyPlan(
+          goal.name,
+          goal.category || 'skill',
+          baseSessions,
+          baseWeekly,
+          totalWeeks,
+          safeMilestones,
+          plan_edits
+        );
+        
+        const allWeeks = fullPlan.weeks.map((week: any) => ({
+          week: week.week_number,
+          week_number: week.week_number,
+          focus: week.focus,
+          phase: week.week_number <= Math.ceil(totalWeeks * 0.3) ? 'foundation' 
+               : week.week_number <= Math.ceil(totalWeeks * 0.7) ? 'development' 
+               : 'peak',
+          sessions: (week.sessions || []).map((s: any) => ({
+            name: s.name,
+            description: s.description,
+            duration_mins: s.duration_mins || baseSessionLength,
+            notes: s.notes || '',
+            tip: s.notes || '',
+          })),
+        }));
+        
+        plan.weekly_plan = {
+          summary: fullPlan.summary,
+          realism_notes: fullPlan.realism_notes,
+          weeks: allWeeks,
+          milestones: fullPlan.milestones || safeMilestones,
+        };
+        
+        console.log(`✅ AI generated ${allWeeks.length} unique weeks`);
+        
+      } catch (aiError: any) {
+        console.error('⚠️ AI plan generation failed, using fallback:', aiError.message);
+        
+        const midWeekNum = Math.ceil(totalWeeks / 2);
+        const fallbackWeeks: any[] = [];
+        
+        for (let w = 1; w <= totalWeeks; w++) {
+          const sessions = Array.from({ length: baseSessions }, (_, i) => ({
+            name: `${goal.name} - Week ${w} Session ${i + 1}`,
+            description: `Training session for week ${w}`,
+            duration_mins: baseSessionLength,
+            notes: 'Focus on progress',
+          }));
+          
+          fallbackWeeks.push({
+            week: w,
+            week_number: w,
+            focus: w <= Math.ceil(totalWeeks * 0.3) ? 'Foundation' : w <= Math.ceil(totalWeeks * 0.7) ? 'Development' : 'Peak Performance',
+            phase: w <= Math.ceil(totalWeeks * 0.3) ? 'foundation' : w <= Math.ceil(totalWeeks * 0.7) ? 'development' : 'peak',
+            sessions,
+          });
+        }
+        
+        plan.weekly_plan = {
+          summary: `${totalWeeks}-week plan for ${goal.name}`,
+          weeks: fallbackWeeks,
+          milestones: safeMilestones,
+        };
+      }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     console.log('🤖 Generating full AI plan with unique sessions for each week...');
     
     try {
@@ -2958,7 +3674,7 @@ router.post('/:goalId/create-plan-with-milestones', async (req: Request, res: Re
 
     await supabase.from('goals').update({ progress }).eq('id', goalId);
 
-    console.log(`✅ Created plan: ${baseWeekly}h/week, ${baseSessions} sessions, ${totalWeeks} weeks`);
+    console.log(`✅ Created AI plan: ${baseWeekly}h/week, ${baseSessions} sessions, ${totalWeeks} weeks`);
 
     const { data: updatedGoal } = await supabase
       .from('goals')
@@ -3018,6 +3734,8 @@ router.post('/:goalId/create-plan-with-milestones', async (req: Request, res: Re
     return res.status(500).json({ error: 'Failed to create plan', message: error.message });
   }
 });
+
+
 
 router.get('/', async (req: Request, res: Response) => {
   try {
