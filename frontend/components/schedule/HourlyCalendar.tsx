@@ -52,7 +52,6 @@ interface DroppableData {
   date: Date;
 }
 
-// Template block - represents a recurring time slot pattern
 interface TemplateBlock {
   id: string;
   dayOfWeek: number;
@@ -157,6 +156,21 @@ const isDraggableBlock = (block: ScheduleBlock | TemplateBlock): boolean => {
 const isBlockerType = (type: string): boolean => ['work', 'commute', 'event', 'social', 'sleep'].includes(type);
 const isTrainingBlock = (block: ScheduleBlock | TemplateBlock): boolean => block.type === 'workout' || block.type === 'training';
 
+const getCategoryEmoji = (category?: string): string => {
+  const emojis: Record<string, string> = {
+    fitness: '🏃',
+    climbing: '🧗',
+    languages: '🌍',
+    business: '💼',
+    creative: '🎨',
+    mental_health: '🧘',
+    music: '🎸',
+    education: '📚',
+    health: '❤️',
+  };
+  return emojis[category || ''] || '🎯';
+};
+
 const formatDateLabel = (date: Date): string => {
   if (isToday(date)) return 'Today';
   if (isYesterday(date)) return 'Yesterday';
@@ -247,6 +261,132 @@ function AvailabilityBlock({ block }: { block: { type: string; startHour: number
         {getBlockIcon(block.type)}
         <span className="truncate">{block.label}</span>
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// MOBILE TEMPLATE VIEW - Vertical day list (NEW!)
+// ============================================================
+
+function MobileTemplateView({ 
+  templateBlocksByDay, 
+  onBlockClick, 
+  onAddClick,
+  totalSessions 
+}: {
+  templateBlocksByDay: Record<number, TemplateBlock[]>;
+  onBlockClick: (block: TemplateBlock) => void;
+  onAddClick: () => void;
+  totalSessions: number;
+}) {
+  const today = new Date();
+  const todayDayIndex = today.getDay();
+  
+  const orderedDays = [1, 2, 3, 4, 5, 6, 0];
+
+  return (
+    <div className="flex flex-col h-full bg-white/50 backdrop-blur-sm">
+      <div className="bg-white/80 backdrop-blur-xl border-b border-white/40 px-4 py-4 flex-shrink-0">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-slate-700">Your weekly rhythm</h2>
+            <p className="text-sm text-slate-500">{totalSessions} sessions per week</p>
+          </div>
+          <button 
+            onClick={onAddClick}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-xl text-sm font-medium"
+          >
+            <Plus className="w-4 h-4" />
+            Add
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto pb-24">
+        {orderedDays.map((dayIndex) => {
+          const dayBlocks = templateBlocksByDay[dayIndex] || [];
+          const isCurrentDay = dayIndex === todayDayIndex;
+          const dayName = DAY_NAMES[dayIndex];
+          
+          const sortedBlocks = [...dayBlocks].sort((a, b) => {
+            const timeA = a.hour * 60 + a.minute;
+            const timeB = b.hour * 60 + b.minute;
+            return timeA - timeB;
+          });
+
+          return (
+            <div key={dayIndex} className="border-b border-white/30 last:border-b-0">
+              <div className={`sticky top-0 z-10 px-4 py-3 ${isCurrentDay ? 'bg-slate-100/90' : 'bg-white/80'} backdrop-blur-xl`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-base font-bold ${isCurrentDay ? 'text-slate-800' : 'text-slate-700'}`}>
+                      {dayName}
+                    </span>
+                    {isCurrentDay && (
+                      <span className="px-2 py-0.5 bg-slate-700 text-white text-xs rounded-full">
+                        Today
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-sm text-slate-400">
+                    {sortedBlocks.length} session{sortedBlocks.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              </div>
+
+              <div className="px-4 pb-3">
+                {sortedBlocks.length === 0 ? (
+                  <p className="text-slate-400 text-sm py-3 italic">No sessions scheduled</p>
+                ) : (
+                  <div className="space-y-2">
+                    {sortedBlocks.map((block) => {
+                      const timeStr = format(setMinutes(setHours(new Date(), block.hour), block.minute), 'h:mm a');
+                      const notesParts = (block.notes || '').split('|||');
+                      const displayName = notesParts[0] || block.goals?.name || 'Session';
+                      const category = block.goals?.category;
+                      const emoji = getCategoryEmoji(category);
+                      
+                      return (
+                        <button
+                          key={block.id}
+                          onClick={() => onBlockClick(block)}
+                          className="w-full text-left"
+                        >
+                          <div className={`flex items-center gap-3 p-3 rounded-xl border-2 ${getBlockStyle(block.type, category)} active:scale-[0.98] transition-transform`}>
+                            <div className="w-10 h-10 rounded-xl bg-white/50 flex items-center justify-center text-xl flex-shrink-0">
+                              {emoji}
+                            </div>
+                            
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-sm truncate">{displayName}</div>
+                              {block.goals?.name && displayName !== block.goals.name && (
+                                <div className="text-xs opacity-70 truncate">{block.goals.name}</div>
+                              )}
+                            </div>
+                            
+                            <div className="text-right flex-shrink-0">
+                              <div className="text-sm font-medium">{timeStr}</div>
+                              <div className="text-xs opacity-70">{block.duration_mins}m</div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <button 
+        onClick={onAddClick} 
+        className="fixed bottom-24 right-4 w-14 h-14 bg-slate-700 rounded-full shadow-lg flex items-center justify-center hover:bg-slate-600 z-20"
+      >
+        <Plus className="w-6 h-6 text-white" />
+      </button>
     </div>
   );
 }
@@ -957,8 +1097,6 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
   const [overlapWarning, setOverlapWarning] = useState<{ message: string; blockingType: string; show: boolean }>({ message: '', blockingType: '', show: false });
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isMobile, setIsMobile] = useState(false);
-  
-  // View mode: 'template' for weekly template, 'calendar' for actual dates
   const [viewMode, setViewMode] = useState<'template' | 'calendar'>('template');
 
   useEffect(() => { 
@@ -968,7 +1106,6 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
     return () => window.removeEventListener('resize', checkMobile); 
   }, []);
 
-  // Auto-scroll to 6am for template view
   useEffect(() => {
     if (scrollRef.current) {
       const scrollTo = Math.max(0, (6 - START_HOUR) * HOUR_HEIGHT);
@@ -981,7 +1118,6 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
   const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
-  // Mutations
   const deleteBlockMutation = useMutation({ mutationFn: (blockId: string) => scheduleAPI.deleteBlock(blockId), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); } });
   const createRecurringMutation = useMutation({ mutationFn: (data: { user_id: string; type: string; days: string[]; start_time: string; end_time: string; notes?: string }) => scheduleAPI.createRecurringBlock(data), onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); alert('✅ ' + data.message); }, onError: (error: Error & { response?: { data?: { message?: string } } }) => { alert('❌ ' + (error.response?.data?.message || 'Failed to create blocks')); } });
   const completeWithNotesMutation = useMutation({ mutationFn: async ({ blockId, notes }: { blockId: string; notes: string }) => scheduleAPI.completeBlockWithNotes(blockId, notes), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['schedule'] }); onBlockUpdate?.(); setBlockToComplete(null); } });
@@ -989,28 +1125,22 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
   const handleCompleteClick = (blockId: string) => { const block = blocks.find(b => b.id === blockId); if (block) { setSelectedBlock(null); setBlockToComplete(block); } };
   const handleQuickComplete = (block: ScheduleBlock) => { setBlockToComplete(block); };
 
-  // ============================================================
-  // TEMPLATE WEEK VIEW - Group blocks by day-of-week and dedupe
-  // ============================================================
   const templateBlocksByDay = useMemo(() => {
     const grouped: Record<number, TemplateBlock[]> = {};
     for (let i = 0; i < 7; i++) grouped[i] = [];
     
-    // Group ALL training blocks by day-of-week
     const byDayOfWeek: Record<number, ScheduleBlock[]> = {};
     for (let i = 0; i < 7; i++) byDayOfWeek[i] = [];
     
     blocks.forEach((block) => {
-      // Only include training/workout blocks in template view
       if (block.type !== 'workout' && block.type !== 'training') return;
       if (block.status === 'completed' || block.status === 'skipped') return;
       
       const blockDate = parseISO(block.scheduled_start);
-      const dayOfWeek = blockDate.getDay(); // 0=Sun, 1=Mon, etc.
+      const dayOfWeek = blockDate.getDay();
       byDayOfWeek[dayOfWeek].push(block);
     });
     
-    // For each day, dedupe by time slot (keep first occurrence of each time)
     for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
       const dayBlocks = byDayOfWeek[dayIndex];
       const seenTimes = new Map<string, TemplateBlock>();
@@ -1036,7 +1166,6 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
           };
           seenTimes.set(timeKey, templateBlock);
         } else {
-          // Add this block's ID to the existing template block
           seenTimes.get(timeKey)!.allBlockIds.push(block.id);
         }
       }
@@ -1047,7 +1176,6 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
     return grouped;
   }, [blocks]);
 
-  // Availability blocks for background
   const availabilityBlocks = useMemo(() => {
     if (!availability) return [];
     const result: Array<{ type: string; dayIndex: number; startHour: number; startMin: number; durationMins: number; label: string }> = [];
@@ -1098,18 +1226,22 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
     setShowAddModal(true); 
   };
 
-  // Count total sessions for header
   const totalTemplateSessions = Object.values(templateBlocksByDay).reduce((sum, arr) => sum + arr.length, 0);
 
-  // Mobile view
+  // Mobile view - Template View (vertical day list)
   if (isMobile) {
     return (
       <>
         <div className="h-[calc(100vh-140px)] relative">
-          <MobileAgendaView blocks={blocks} availability={availability} userId={userId} onBlockClick={setSelectedBlock} onAddClick={() => setShowAddModal(true)} onQuickComplete={handleQuickComplete} weekOffset={weekOffset} setWeekOffset={setWeekOffset} />
+          <MobileTemplateView 
+            templateBlocksByDay={templateBlocksByDay}
+            onBlockClick={setSelectedTemplateBlock}
+            onAddClick={() => setShowAddModal(true)}
+            totalSessions={totalTemplateSessions}
+          />
         </div>
         <AddBlockModal isOpen={showAddModal} onClose={() => { setShowAddModal(false); setSelectedSlot(null); }} onAdd={handleAddBlock} selectedDay={selectedSlot?.day} selectedHour={selectedSlot?.hour} />
-        <SessionDetailModal block={selectedBlock} onClose={() => setSelectedBlock(null)} onComplete={handleCompleteClick} onDelete={(id) => deleteBlockMutation.mutate(id)} />
+        <TemplateDetailModal block={selectedTemplateBlock} onClose={() => setSelectedTemplateBlock(null)} />
         <CompleteWithNotesModal block={blockToComplete} onClose={() => setBlockToComplete(null)} onComplete={(blockId, notes) => completeWithNotesMutation.mutate({ blockId, notes })} isLoading={completeWithNotesMutation.isPending} />
       </>
     );
@@ -1119,7 +1251,6 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
   return (
     <DndContext sensors={sensors} onDragStart={() => {}} onDragOver={() => {}} onDragEnd={() => {}}>
       <div className="backdrop-blur-xl bg-white/70 rounded-2xl shadow-lg border border-white/80 overflow-hidden flex flex-col h-[calc(100vh-280px)]">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 bg-slate-700 text-white flex-shrink-0">
           <div className="flex items-center gap-3">
             <LayoutGrid className="w-5 h-5 opacity-80" />
@@ -1133,7 +1264,6 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
           </button>
         </div>
 
-        {/* Legend */}
         <div className="flex items-center justify-between px-4 py-2 bg-white/30 backdrop-blur-sm border-b border-white/40 flex-shrink-0">
           <div className="flex gap-4 text-xs text-slate-600">
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-slate-200/80 border border-slate-400" /><span>Work</span></div>
@@ -1145,9 +1275,7 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
           </div>
         </div>
 
-        {/* Calendar Grid */}
         <div className="flex-1 overflow-auto flex" ref={scrollRef}>
-          {/* Time column */}
           <div className="w-16 flex-shrink-0 border-r border-white/40 bg-white/30 backdrop-blur-sm sticky left-0 z-20">
             <div className="h-12 border-b border-white/40 bg-white/30" />
             <div className="relative" style={{ height: HOURS.length * HOUR_HEIGHT + 'px' }}>
@@ -1159,7 +1287,6 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
             </div>
           </div>
 
-          {/* Day columns */}
           <div className="flex-1">
             <div className="flex min-w-[700px]">
               {DAYS.map((dayName, dayIndex) => {
@@ -1170,15 +1297,12 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
                 
                 return (
                   <div key={dayIndex} className="flex-1 min-w-[100px] border-r border-white/40 last:border-r-0">
-                    {/* Day header - just day name, no dates */}
                     <div className={`h-12 px-2 py-1 border-b border-white/40 text-center sticky top-0 z-10 backdrop-blur-sm ${isCurrentDay ? 'bg-slate-100/80' : 'bg-white/50'}`}>
                       <div className={`text-sm font-bold ${isCurrentDay ? 'text-slate-700' : 'text-slate-600'}`}>{DAY_LABELS[dayIndex]}</div>
                       <div className="text-xs text-slate-400">{dayTemplateBlocks.length} session{dayTemplateBlocks.length !== 1 ? 's' : ''}</div>
                     </div>
                     
-                    {/* Time slots */}
                     <div className="relative" style={{ height: HOURS.length * HOUR_HEIGHT + 'px' }}>
-                      {/* Hour grid lines */}
                       {HOURS.map((hour, idx) => (
                         <div key={hour} className={`absolute left-0 right-0 border-t border-white/30 ${idx % 2 === 0 ? 'bg-white/20' : 'bg-white/10'}`} style={{ top: idx * HOUR_HEIGHT + 'px', height: HOUR_HEIGHT + 'px' }}>
                           {[0, 15, 30, 45].map((minute) => (
@@ -1192,12 +1316,10 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
                         </div>
                       ))}
                       
-                      {/* Availability blocks (work, sleep, etc) */}
                       {dayAvailBlocks.map((block, idx) => (
                         <AvailabilityBlock key={`avail-${idx}`} block={block} />
                       ))}
                       
-                      {/* Template training blocks */}
                       {dayTemplateBlocks.map((block) => {
                         const top = (block.hour - START_HOUR) * HOUR_HEIGHT + (block.minute / 60) * HOUR_HEIGHT;
                         const height = (block.duration_mins / 60) * HOUR_HEIGHT;
@@ -1219,7 +1341,6 @@ export default function HourlyCalendar({ blocks, availability, userId, onBlockUp
           </div>
         </div>
 
-        {/* Modals */}
         <AddBlockModal isOpen={showAddModal} onClose={() => { setShowAddModal(false); setSelectedSlot(null); }} onAdd={handleAddBlock} selectedDay={selectedSlot?.day} selectedHour={selectedSlot?.hour} />
         <TemplateDetailModal block={selectedTemplateBlock} onClose={() => setSelectedTemplateBlock(null)} />
         <SessionDetailModal block={selectedBlock} onClose={() => setSelectedBlock(null)} onComplete={handleCompleteClick} onDelete={(id) => deleteBlockMutation.mutate(id)} />

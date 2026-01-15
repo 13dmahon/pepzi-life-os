@@ -1,6 +1,7 @@
 'use client';
 
-import { Clock, ExternalLink, Play } from 'lucide-react';
+import { useState } from 'react';
+import { Clock, ExternalLink, Play, Sparkles, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { GlassCard } from '@/components/ui/GlassUI';
 
 interface Session {
@@ -21,7 +22,7 @@ interface Session {
 interface SessionCardProps {
   session: Session;
   onStart: (sessionId: string) => void;
-  onStop?: (sessionId: string, elapsedSeconds: number) => void; // Legacy, not used
+  onStop?: (sessionId: string, elapsedSeconds: number) => void;
   isStarting?: boolean;
 }
 
@@ -39,8 +40,70 @@ const categoryStyles: Record<string, { emoji: string; bgColor: string; textColor
   default: { emoji: '✨', bgColor: 'bg-slate-100', textColor: 'text-slate-600' },
 };
 
+// Generate the AI session prompt with full context
+function generateSessionPrompt(session: Session): string {
+  const sessionNumber = session.session_number || 1;
+  const totalSessions = session.total_sessions;
+  const goalName = session.goal_name;
+  const durationMins = session.duration_mins;
+  const completedSessions = sessionNumber - 1;
+  
+  // Use description if available, otherwise a sensible default
+  const focusIntent = session.description 
+    ? session.description 
+    : 'building consistency and making progress';
+
+  // Build the progress line
+  let progressLine = '';
+  if (totalSessions) {
+    progressLine = `I'm on Session ${sessionNumber} of ${totalSessions} for my goal "${goalName}".`;
+    if (completedSessions > 0) {
+      progressLine += `\n\nThis is part of a longer plan, and I've already completed ${completedSessions} session${completedSessions > 1 ? 's' : ''}.`;
+    }
+  } else {
+    progressLine = `I'm on Session ${sessionNumber} of "${goalName}".`;
+  }
+
+  return `${progressLine}
+
+Today I have ${durationMins} minutes.
+
+The intended focus for this session is:
+"${focusIntent}"
+
+I want this session to:
+- Build momentum
+- Avoid overreaching
+- Move me meaningfully forward
+
+Please:
+1. Break this session into clear steps
+2. Tell me what "good progress" looks like
+3. Tell me when to stop`;
+}
+
 export default function SessionCard({ session, onStart, isStarting }: SessionCardProps) {
   const style = categoryStyles[session.category || 'default'] || categoryStyles.default;
+  const [showPrompt, setShowPrompt] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const prompt = generateSessionPrompt(session);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  const handleOpenChatGPT = () => {
+    // Copy to clipboard first, then open ChatGPT
+    navigator.clipboard.writeText(prompt).catch(() => {});
+    window.open('https://chat.openai.com/', '_blank');
+  };
 
   return (
     <GlassCard className="p-4" hover={true}>
@@ -57,10 +120,7 @@ export default function SessionCard({ session, onStart, isStarting }: SessionCar
           
           {/* Session Name */}
           <h3 className="font-semibold text-slate-700 mb-1">
-            {session.session_number 
-              ? `${session.goal_name} - Session ${session.session_number}`
-              : session.name
-            }
+            {session.name}
           </h3>
 
           {/* Description */}
@@ -86,7 +146,7 @@ export default function SessionCard({ session, onStart, isStarting }: SessionCar
                 onClick={(e) => e.stopPropagation()}
               >
                 <ExternalLink className="w-4 h-4" />
-                <span>Open ChatGPT</span>
+                <span>Resource</span>
               </a>
             )}
           </div>
@@ -102,6 +162,73 @@ export default function SessionCard({ session, onStart, isStarting }: SessionCar
         <Play className="w-5 h-5" />
         Start Session
       </button>
+
+      {/* AI Prompt Toggle */}
+      <button
+        onClick={() => setShowPrompt(!showPrompt)}
+        className="w-full mt-3 py-2 flex items-center justify-center gap-2 text-sm text-violet-600 hover:text-violet-700 transition-colors"
+      >
+        <Sparkles className="w-4 h-4" />
+        <span>Using ChatGPT? Get session prompt</span>
+        {showPrompt ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+      </button>
+
+      {/* AI Prompt Panel */}
+      {showPrompt && (
+        <div className="mt-3 p-4 bg-gradient-to-br from-violet-50 to-purple-50 rounded-xl border border-violet-100">
+          {/* Prompt Text */}
+          <div className="relative">
+            <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed bg-white/60 rounded-lg p-3 border border-violet-100">
+              {prompt}
+            </pre>
+            
+            {/* Copy Button (top right corner) */}
+            <button
+              onClick={handleCopy}
+              className="absolute top-2 right-2 p-1.5 bg-white rounded-lg shadow-sm hover:bg-violet-50 transition-colors border border-violet-200"
+              title="Copy to clipboard"
+            >
+              {copied ? (
+                <Check className="w-4 h-4 text-emerald-500" />
+              ) : (
+                <Copy className="w-4 h-4 text-violet-500" />
+              )}
+            </button>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={handleCopy}
+              className="flex-1 py-2 px-3 bg-white hover:bg-violet-50 text-violet-700 font-medium rounded-lg transition-colors flex items-center justify-center gap-2 text-sm border border-violet-200"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4" />
+                  Copy Prompt
+                </>
+              )}
+            </button>
+            
+            <button
+              onClick={handleOpenChatGPT}
+              className="flex-1 py-2 px-3 bg-violet-600 hover:bg-violet-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Open ChatGPT
+            </button>
+          </div>
+
+          <p className="text-xs text-violet-400 mt-2 text-center">
+            Paste this prompt to get a step-by-step guide for your session
+          </p>
+        </div>
+      )}
     </GlassCard>
   );
 }

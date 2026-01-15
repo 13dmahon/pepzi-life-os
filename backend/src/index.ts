@@ -7,6 +7,7 @@ import scheduleRoutes from './routes/schedule';
 import memoryRoutes from './routes/memory';
 import availabilityRoutes from './routes/availability';
 import aiChatRoutes from './routes/ai-chat';
+import postsRoutes from './routes/posts';
 
 dotenv.config();
 
@@ -38,12 +39,14 @@ app.use(cors({
 
 app.use(express.json());
 
+// API Routes
 app.use('/api/chat', chatRoutes);
 app.use('/api/goals', goalRoutes);
 app.use('/api/schedule', scheduleRoutes);
 app.use('/api/memory', memoryRoutes);
 app.use('/api/availability', availabilityRoutes);
 app.use('/api/ai-chat', aiChatRoutes);
+app.use('/api/posts', postsRoutes);
 
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
