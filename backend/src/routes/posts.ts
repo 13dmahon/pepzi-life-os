@@ -1,256 +1,361 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { supabase } from '../services/supabase';
 
 const router = Router();
 
 // ============================================================
-// GET /api/posts/feed
-// Get posts for the user's feed
+// POST /api/posts - Create a new feed post
 // ============================================================
-router.get('/feed', async (req, res) => {
-  try {
-    const userId = req.query.user_id as string;
-    const limit = parseInt(req.query.limit as string) || 20;
-    const offset = parseInt(req.query.offset as string) || 0;
-
-    if (!userId) {
-      return res.status(400).json({ error: 'user_id is required' });
-    }
-
-    const { data: posts, error } = await supabase
-      .from('posts')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-
-    if (error) {
-      console.error('Error fetching feed:', error);
-      return res.status(500).json({ error: 'Failed to fetch feed' });
-    }
-
-    // Check if current user has liked each post
-    const postIds = (posts || []).map((p: any) => p.id);
-    let likedPostIds = new Set<string>();
-    
-    if (postIds.length > 0) {
-      const { data: userLikes } = await supabase
-        .from('post_likes')
-        .select('post_id')
-        .eq('user_id', userId)
-        .in('post_id', postIds);
-
-      likedPostIds = new Set((userLikes || []).map((l: any) => l.post_id));
-    }
-
-    const postsWithLikeStatus = (posts || []).map((post: any) => ({
-      ...post,
-      user_has_liked: likedPostIds.has(post.id),
-    }));
-
-    return res.json({ posts: postsWithLikeStatus });
-  } catch (err) {
-    console.error('Feed error:', err);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ============================================================
-// POST /api/posts
-// Create a new post
-// ============================================================
-router.post('/', async (req, res) => {
+router.post('/', async (req: Request, res: Response) => {
   try {
     const {
       user_id,
-      caption,
-      photo_url,
       goal_id,
-      session_id,
       goal_name,
       goal_emoji,
+      caption,
+      photo_url,
+      media_urls,
+      session_id,
       session_name,
       session_number,
       total_sessions,
       duration_mins,
-      streak_days,
       progress_percent,
-      is_public,
+      streak_days,
+      is_public = true,
     } = req.body;
 
     if (!user_id || !goal_name) {
-      return res.status(400).json({ error: 'user_id and goal_name are required' });
+      return res.status(400).json({ error: 'Missing user_id or goal_name' });
     }
 
+    console.log(`📝 Creating feed post for goal: ${goal_name}`);
+
+    // Create the post using existing schema
     const { data: post, error } = await supabase
       .from('posts')
       .insert({
         user_id,
-        caption,
-        photo_url,
-        goal_id,
-        session_id,
+        goal_id: goal_id || null,
         goal_name,
         goal_emoji: goal_emoji || '⭐',
-        session_name,
-        session_number,
-        total_sessions,
-        duration_mins,
+        caption: caption || null,
+        photo_url: photo_url || null,
+        media_urls: media_urls || [],
+        session_id: session_id || null,
+        session_name: session_name || null,
+        session_number: session_number || null,
+        total_sessions: total_sessions || null,
+        duration_mins: duration_mins || null,
+        progress_percent: progress_percent || 100,
         streak_days: streak_days || 0,
-        progress_percent: progress_percent || 0,
-        is_public: is_public || false,
+        is_public,
+        likes_count: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       })
       .select()
       .single();
 
-    if (error) {
-      console.error('Error creating post:', error);
-      return res.status(500).json({ error: 'Failed to create post' });
-    }
+    if (error) throw error;
 
-    return res.status(201).json({ post });
-  } catch (err) {
-    console.error('Create post error:', err);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.log(`✅ Feed post created: ${post.id}`);
+
+    return res.json({
+      success: true,
+      post,
+      message: 'Post shared to feed!',
+    });
+
+  } catch (error: any) {
+    console.error('❌ Create post error:', error);
+    return res.status(500).json({
+      error: 'Failed to create post',
+      message: error.message,
+    });
   }
 });
 
 // ============================================================
-// DELETE /api/posts/:id
+// GET /api/posts - Get feed posts
 // ============================================================
-router.delete('/:id', async (req, res) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
-    const postId = req.params.id;
-    const userId = req.query.user_id as string;
+    const { user_id, limit = 20, offset = 0 } = req.query;
 
-    if (!userId) {
-      return res.status(400).json({ error: 'user_id is required' });
-    }
+    console.log('📖 Fetching feed posts');
 
-    const { error } = await supabase
+    // Get public posts, ordered by newest first
+    const { data: posts, error } = await supabase
       .from('posts')
-      .delete()
-      .eq('id', postId)
-      .eq('user_id', userId);
+      .select(`
+        *,
+        users (id, name, email, display_name, avatar_url)
+      `)
+      .eq('is_public', true)
+      .order('created_at', { ascending: false })
+      .range(Number(offset), Number(offset) + Number(limit) - 1);
 
-    if (error) {
-      console.error('Error deleting post:', error);
-      return res.status(500).json({ error: 'Failed to delete post' });
+    if (error) throw error;
+
+    // Get likes for current user if provided
+    let userLikes: string[] = [];
+    if (user_id) {
+      const { data: likes } = await supabase
+        .from('post_likes')
+        .select('post_id')
+        .eq('user_id', user_id as string);
+      
+      userLikes = (likes || []).map(l => l.post_id);
     }
 
-    return res.json({ success: true });
-  } catch (err) {
-    console.error('Delete post error:', err);
-    return res.status(500).json({ error: 'Internal server error' });
+    // Format response for frontend
+    const formattedPosts = (posts || []).map(post => ({
+      id: post.id,
+      user: {
+        id: post.user_id,
+        name: post.users?.display_name || post.users?.name || post.users?.email?.split('@')[0] || 'Anonymous',
+        avatar: (post.users?.display_name || post.users?.name || post.users?.email || 'A').slice(0, 2).toUpperCase(),
+        avatarUrl: post.users?.avatar_url,
+      },
+      book: {
+        id: post.goal_id,
+        name: post.goal_name,
+        emoji: post.goal_emoji || '⭐',
+        totalSessions: post.total_sessions || 0,
+        totalHours: Math.round((post.duration_mins || 0) / 60 * 10) / 10,
+        completedDate: post.created_at,
+      },
+      post: {
+        caption: post.caption,
+        image: post.photo_url || (post.media_urls?.length ? post.media_urls[0] : null),
+        mediaUrls: post.media_urls || [],
+        timeAgo: getTimeAgo(new Date(post.created_at)),
+      },
+      stats: {
+        likes: post.likes_count || 0,
+        comments: 0, // Add comments count if you have a comments table
+        liked: userLikes.includes(post.id),
+      },
+      meta: {
+        sessionName: post.session_name,
+        sessionNumber: post.session_number,
+        progressPercent: post.progress_percent,
+        streakDays: post.streak_days,
+      },
+    }));
+
+    return res.json({
+      posts: formattedPosts,
+      total: formattedPosts.length,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Fetch posts error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch posts',
+      message: error.message,
+    });
   }
 });
 
 // ============================================================
-// POST /api/posts/:id/like
+// POST /api/posts/:id/like - Like/unlike a post
 // ============================================================
-router.post('/:id/like', async (req, res) => {
+router.post('/:id/like', async (req: Request, res: Response) => {
   try {
-    const postId = req.params.id;
+    const { id } = req.params;
     const { user_id } = req.body;
 
     if (!user_id) {
-      return res.status(400).json({ error: 'user_id is required' });
+      return res.status(400).json({ error: 'Missing user_id' });
     }
 
-    const { error } = await supabase
+    // Check if already liked
+    const { data: existingLike } = await supabase
       .from('post_likes')
-      .insert({
-        post_id: postId,
-        user_id,
-      });
+      .select('id')
+      .eq('post_id', id)
+      .eq('user_id', user_id)
+      .single();
 
-    if (error) {
-      if (error.code === '23505') {
-        return res.json({ success: true, already_liked: true });
-      }
-      console.error('Error liking post:', error);
-      return res.status(500).json({ error: 'Failed to like post' });
+    if (existingLike) {
+      // Unlike - delete the like
+      await supabase
+        .from('post_likes')
+        .delete()
+        .eq('post_id', id)
+        .eq('user_id', user_id);
+
+      // Decrement count
+      await supabase
+        .from('posts')
+        .update({ 
+          likes_count: supabase.rpc('decrement', { x: 1 }),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id);
+
+      // Manual decrement since rpc might not exist
+      const { data: post } = await supabase
+        .from('posts')
+        .select('likes_count')
+        .eq('id', id)
+        .single();
+      
+      await supabase
+        .from('posts')
+        .update({ likes_count: Math.max(0, (post?.likes_count || 1) - 1) })
+        .eq('id', id);
+
+      return res.json({ liked: false, message: 'Post unliked' });
+    } else {
+      // Like - create the like
+      await supabase
+        .from('post_likes')
+        .insert({ 
+          post_id: id, 
+          user_id, 
+          created_at: new Date().toISOString() 
+        });
+
+      // Increment count
+      const { data: post } = await supabase
+        .from('posts')
+        .select('likes_count')
+        .eq('id', id)
+        .single();
+      
+      await supabase
+        .from('posts')
+        .update({ 
+          likes_count: (post?.likes_count || 0) + 1,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id);
+
+      return res.json({ liked: true, message: 'Post liked' });
     }
 
-    return res.json({ success: true });
-  } catch (err) {
-    console.error('Like post error:', err);
-    return res.status(500).json({ error: 'Internal server error' });
+  } catch (error: any) {
+    console.error('❌ Like error:', error);
+    return res.status(500).json({
+      error: 'Failed to like post',
+      message: error.message,
+    });
   }
 });
 
 // ============================================================
-// DELETE /api/posts/:id/like
+// GET /api/posts/:id - Get single post
 // ============================================================
-router.delete('/:id/like', async (req, res) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const postId = req.params.id;
-    const userId = req.query.user_id as string;
+    const { id } = req.params;
+    const { user_id } = req.query;
 
-    if (!userId) {
-      return res.status(400).json({ error: 'user_id is required' });
+    const { data: post, error } = await supabase
+      .from('posts')
+      .select(`
+        *,
+        users (id, name, email, display_name, avatar_url)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (error || !post) {
+      return res.status(404).json({ error: 'Post not found' });
     }
 
-    const { error } = await supabase
+    // Check if user liked
+    let liked = false;
+    if (user_id) {
+      const { data: like } = await supabase
+        .from('post_likes')
+        .select('id')
+        .eq('post_id', id)
+        .eq('user_id', user_id as string)
+        .single();
+      liked = !!like;
+    }
+
+    return res.json({
+      post: {
+        ...post,
+        liked,
+      },
+    });
+
+  } catch (error: any) {
+    console.error('❌ Get post error:', error);
+    return res.status(500).json({
+      error: 'Failed to get post',
+      message: error.message,
+    });
+  }
+});
+
+// ============================================================
+// DELETE /api/posts/:id - Delete a post
+// ============================================================
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'Missing user_id' });
+    }
+
+    // Verify ownership
+    const { data: post } = await supabase
+      .from('posts')
+      .select('user_id')
+      .eq('id', id)
+      .single();
+
+    if (!post || post.user_id !== user_id) {
+      return res.status(403).json({ error: 'Not authorized to delete this post' });
+    }
+
+    // Delete likes first
+    await supabase
       .from('post_likes')
       .delete()
-      .eq('post_id', postId)
-      .eq('user_id', userId);
+      .eq('post_id', id);
 
-    if (error) {
-      console.error('Error unliking post:', error);
-      return res.status(500).json({ error: 'Failed to unlike post' });
-    }
+    // Delete the post
+    const { error } = await supabase
+      .from('posts')
+      .delete()
+      .eq('id', id);
 
-    return res.json({ success: true });
-  } catch (err) {
-    console.error('Unlike post error:', err);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
+    if (error) throw error;
 
-// ============================================================
-// POST /api/posts/upload-image
-// ============================================================
-router.post('/upload-image', async (req, res) => {
-  try {
-    const { user_id, image_base64, file_name } = req.body;
+    return res.json({ success: true, message: 'Post deleted' });
 
-    if (!user_id || !image_base64) {
-      return res.status(400).json({ error: 'user_id and image_base64 are required' });
-    }
-
-    const base64Data = image_base64.replace(/^data:image\/\w+;base64,/, '');
-    const buffer = Buffer.from(base64Data, 'base64');
-    
-    const timestamp = Date.now();
-    const fileName = `${user_id}/${timestamp}_${file_name || 'image.jpg'}`;
-
-    const { data, error } = await supabase.storage
-      .from('post-images')
-      .upload(fileName, buffer, {
-        contentType: 'image/jpeg',
-        upsert: false,
-      });
-
-    if (error) {
-      console.error('Error uploading image:', error);
-      return res.status(500).json({ error: 'Failed to upload image' });
-    }
-
-    const { data: urlData } = supabase.storage
-      .from('post-images')
-      .getPublicUrl(fileName);
-
-    return res.json({ 
-      success: true, 
-      url: urlData.publicUrl,
-      path: data.path,
+  } catch (error: any) {
+    console.error('❌ Delete post error:', error);
+    return res.status(500).json({
+      error: 'Failed to delete post',
+      message: error.message,
     });
-  } catch (err) {
-    console.error('Upload image error:', err);
-    return res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// ============================================================
+// Helper: Get time ago string
+// ============================================================
+function getTimeAgo(date: Date): string {
+  const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+  
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d`;
+  if (seconds < 2592000) return `${Math.floor(seconds / 604800)}w`;
+  return `${Math.floor(seconds / 2592000)}mo`;
+}
 
 export default router;

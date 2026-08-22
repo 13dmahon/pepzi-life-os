@@ -724,7 +724,92 @@ router.get('/backlog', async (req: Request, res: Response) => {
   }
 });
 
+
+
 /**
+ * GET /api/schedule/goal/:goalId/sessions
+ * Returns all sessions (schedule_blocks) for a specific goal
+ * Used by BookInterior (library pages)
+ */
+router.get('/goal/:goalId/sessions', async (req: Request, res: Response) => {
+  try {
+    const { goalId } = req.params;
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'Missing user_id query parameter' });
+    }
+
+    const { data: blocks, error } = await supabase
+      .from('schedule_blocks')
+      .select(`
+        id,
+        goal_id,
+        scheduled_start,
+        duration_mins,
+        status,
+        notes,
+        diary_notes,
+        actual_duration_seconds,
+        completed_at,
+        tracked_data,
+        goals (name)
+      `)
+      .eq('user_id', user_id as string)
+      .eq('goal_id', goalId)
+      .in('type', ['training', 'workout'])
+      .order('scheduled_start', { ascending: true });
+
+    if (error) throw error;
+
+    const sessions = (blocks || []).map((b: any) => {
+      const scheduled = new Date(b.scheduled_start);
+      const scheduled_date = scheduled.toISOString().split('T')[0];
+      const scheduled_time = scheduled.toTimeString().slice(0, 5); // HH:MM
+
+      // You already use this format in backlog:
+      // notes = "Session Name|||Description"
+      const parts = (b.notes || '').split('|||');
+      const name = parts[0] || 'Session';
+      const description = parts[1] || '';
+
+      return {
+        id: b.id,
+        goal_id: b.goal_id,
+        goal_name: b.goals?.name || '',
+        name,
+        description,
+        scheduled_date,
+        scheduled_time,
+        duration_mins: b.duration_mins,
+        status: b.status,
+        diary_notes: b.diary_notes || null,
+        actual_duration_seconds: b.actual_duration_seconds || null,
+        completed_at: b.completed_at || null,
+        tracked_data: b.tracked_data || null,
+      };
+    });
+
+    return res.json({ sessions });
+  } catch (err: any) {
+    console.error('❌ Goal sessions fetch error:', err);
+    return res.status(500).json({
+      error: 'Failed to fetch goal sessions',
+      message: err.message,
+    });
+  }
+});
+
+/**
+ * 
+ * 
+ * 
+ * 
+ * 
+ *
+ * 
+ * 
+ * 
  * POST /api/schedule
  * Create a new schedule block
  */
@@ -1515,9 +1600,30 @@ router.post('/generate-for-goal', async (req: Request, res: Response) => {
       };
 
       // Get start of current week (Sunday)
-      const currentWeekStart = new Date(todayDate);
-      currentWeekStart.setDate(todayDate.getDate() - todayDate.getDay());
-      currentWeekStart.setHours(0, 0, 0, 0);
+
+
+
+// Get start of current week (Sunday)
+      const currentWeekSunday = new Date(todayDate);
+      currentWeekSunday.setDate(todayDate.getDate() - todayDate.getDay());
+      currentWeekSunday.setHours(0, 0, 0, 0);
+      
+      // Check if any placed session would land in the past this week
+      // If so, start from NEXT week to ensure all sessions are schedulable
+      const todayDayNum = todayDate.getDay(); // 0=Sun, 1=Mon, ...
+      const placedDayNums = placed_sessions.map((p: any) => dayMap[p.day?.toLowerCase()] ?? -1).filter((d: number) => d >= 0);
+      const hasPassedDaysThisWeek = placedDayNums.some((d: number) => d <= todayDayNum);
+      
+      const currentWeekStart = hasPassedDaysThisWeek
+        ? new Date(currentWeekSunday.getTime() + 7 * 24 * 60 * 60 * 1000) // Start next week
+        : currentWeekSunday;
+      
+      console.log(`📍 Today is day ${todayDayNum}, placed days: [${placedDayNums}], starting from ${hasPassedDaysThisWeek ? 'NEXT' : 'THIS'} week: ${currentWeekStart.toISOString().split('T')[0]}`);
+
+
+
+
+
 
       for (let weekIndex = 0; weekIndex < totalWeeks; weekIndex++) {
         const weekStart = new Date(currentWeekStart);
@@ -1970,7 +2076,7 @@ router.get('/session-stats/:goalId', async (req: Request, res: Response) => {
 router.patch('/:id/complete-session', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { duration_seconds, diary_notes } = req.body;
+    const { duration_seconds, diary_notes, tracked_data } = req.body;
 
     console.log(`✅ Completing session ${id} with diary notes`);
 
@@ -2007,6 +2113,11 @@ router.patch('/:id/complete-session', async (req: Request, res: Response) => {
       while (parts.length < 4) parts.push('');
       parts[3] = diary_notes; // Diary notes as 4th part
       updateData.notes = parts.join('|||');
+    }
+
+    // Save tracked data (metrics + notes from AI extraction)
+    if (tracked_data) {
+      updateData.tracked_data = tracked_data;
     }
 
     // Update the block
@@ -2073,6 +2184,64 @@ router.patch('/:id/complete-session', async (req: Request, res: Response) => {
       error: 'Failed to complete session',
       message: error.message,
     });
+  }
+});
+
+/**
+ * POST /api/schedule/tracking/extract
+ * Use AI to extract metrics from natural language notes
+ */
+router.post('/tracking/extract', async (req: Request, res: Response) => {
+  try {
+    const { text, goal_name, category } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ error: 'Missing text to extract from' });
+    }
+
+    const systemPrompt = `You extract structured data from casual session notes.
+
+Given a user's notes about their session, extract:
+1. metrics: numerical values with names, values, units, and types
+2. notes: qualitative observations as strings
+
+Types: money, weight, duration, distance, count, scale, reps
+
+Examples:
+- "Made £150 today" → { metrics: [{ name: "Revenue", value: 150, unit: "£", type: "money" }], notes: [] }
+- "Benched 60kg for 8 reps" → { metrics: [{ name: "Bench Press", value: 60, unit: "kg", type: "weight" }], notes: [] }
+- "Felt tired but pushed through" → { metrics: [], notes: ["Felt tired but pushed through"] }
+
+Return ONLY valid JSON, no markdown.`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Goal: ${goal_name || 'General'} (${category || 'default'})\n\nNotes: "${text}"` },
+      ],
+      temperature: 0.3,
+      max_tokens: 500,
+    });
+
+    const content = response.choices[0]?.message?.content || '{}';
+    
+    let extracted;
+    try {
+      const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      extracted = JSON.parse(cleaned);
+    } catch {
+      extracted = { metrics: [], notes: [text] };
+    }
+
+    if (!extracted.metrics) extracted.metrics = [];
+    if (!extracted.notes) extracted.notes = [];
+
+    return res.json(extracted);
+  } catch (error: any) {
+    console.error('❌ Tracking extract error:', error);
+    // Fallback: just return the text as a note
+    return res.json({ metrics: [], notes: [req.body.text] });
   }
 });
 
@@ -2847,7 +3016,365 @@ router.delete('/:id', async (req: Request, res: Response) => {
     });
   }
 });
+// ============================================================
+// 🆕 DIARY PAGE ENDPOINTS - Get-ahead/Catch-up Logic
+// ============================================================
 
+/**
+ * GET /api/schedule/goal-sessions/:goalId
+ * Get ALL sessions for a goal (for DiaryPage)
+ * Returns sessions sorted by date with status info
+ */
+router.get('/goal-sessions/:goalId', async (req: Request, res: Response) => {
+  try {
+    const { goalId } = req.params;
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'Missing user_id' });
+    }
+
+    console.log(`📖 Fetching all sessions for goal ${goalId}`);
+
+    const { data: blocks, error } = await supabase
+  .from('schedule_blocks')
+  .select(`
+    id,
+    goal_id,
+    scheduled_start,
+    duration_mins,
+    status,
+    notes,
+    diary_notes,
+    tracked_data,
+    completed_at,
+    actual_duration_seconds,
+    session_number,
+    goals (name)
+  `)
+  .eq('goal_id', goalId)
+  .eq('user_id', user_id as string)
+  .in('type', ['training', 'workout'])
+  .order('scheduled_start', { ascending: true });
+
+
+
+    if (error) throw error;
+
+    // Calculate session numbers if not set
+    let sessionNum = 1;
+    const sessions = (blocks || []).map((b: any) => {
+      const scheduled = new Date(b.scheduled_start);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const scheduledDate = new Date(scheduled);
+      scheduledDate.setHours(0, 0, 0, 0);
+
+      // Parse notes: name|||description|||tip
+      const parts = (b.notes || '').split('|||');
+      const name = parts[0] || `Session ${sessionNum}`;
+      const description = parts[1] || '';
+      const prompt = parts[2] || ''; // Could store prompt here or in separate field
+
+      // Determine status
+      let status = b.status;
+      if (status === 'scheduled' && scheduledDate < today) {
+        status = 'missed';
+      }
+
+      const session = {
+        id: b.id,
+        goal_id: b.goal_id,
+        goal_name: b.goals?.name || '',
+        name,
+        description,
+        prompt,
+        scheduled_date: scheduled.toISOString().split('T')[0],
+        scheduled_time: scheduled.toTimeString().slice(0, 5),
+        duration_mins: b.duration_mins,
+        status,
+        session_number: b.session_number || sessionNum,
+        notes: b.diary_notes || '',
+        tracked_data: b.tracked_data || null,  // <-- ADD THIS LINE
+        completed_at: b.completed_at,
+        completed_early: false,
+      };
+
+      sessionNum++;
+      return session;
+    });
+
+    return res.json({ sessions });
+
+  } catch (error: any) {
+    console.error('❌ Goal sessions fetch error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch goal sessions',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/schedule/:id/complete-with-early
+ * Complete a session, optionally marking as completed early
+ */
+router.post('/:id/complete-with-early', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { user_id, notes, completed_early } = req.body;
+
+    console.log(`✅ Completing session ${id}, early: ${completed_early}`);
+
+    // Get the block
+    const { data: block, error: fetchError } = await supabase
+      .from('schedule_blocks')
+      .select('*, goals(id, name, plan)')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !block) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Build update
+    const updateData: any = {
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+    };
+
+    // Save diary notes
+    if (notes) {
+      updateData.diary_notes = notes;
+    }
+
+    // Update the block
+    const { data: updated, error: updateError } = await supabase
+      .from('schedule_blocks')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Update goal progress
+    if (block.goal_id) {
+      const { data: allSessions } = await supabase
+        .from('schedule_blocks')
+        .select('id, status')
+        .eq('goal_id', block.goal_id);
+
+      const total = allSessions?.length || 0;
+      const completed = allSessions?.filter(s => s.status === 'completed').length || 0;
+      const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+      await supabase
+        .from('goals')
+        .update({ progress })
+        .eq('id', block.goal_id);
+
+      // Mark goal as completed if 100%
+      if (progress === 100) {
+        await supabase
+          .from('goals')
+          .update({ status: 'completed' })
+          .eq('id', block.goal_id);
+      }
+    }
+
+    return res.json({
+      message: 'Session completed',
+      session: updated,
+      completed_early: completed_early || false,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Complete with early error:', error);
+    return res.status(500).json({
+      error: 'Failed to complete session',
+      message: error.message,
+    });
+  }
+});
+
+/**
+/**
+ * POST /api/schedule/reshuffle
+ * 
+ * Simple shift-up logic:
+ * When user completes Session 1 early, each session shifts into
+ * the previous session's slot:
+ *   Session 2 → Session 1's date
+ *   Session 3 → Session 2's date
+ *   etc.
+ */
+router.post('/reshuffle', async (req: Request, res: Response) => {
+  try {
+    const { user_id, goal_id, completed_session_id } = req.body;
+
+    if (!user_id || !goal_id) {
+      return res.status(400).json({ error: 'Missing user_id or goal_id' });
+    }
+
+    console.log(`🔄 Reshuffling sessions for goal ${goal_id}`);
+
+    // Get the just-completed session's original date
+    let completedSessionDate: string | null = null;
+    
+    if (completed_session_id) {
+      const { data: completedSession } = await supabase
+        .from('schedule_blocks')
+        .select('scheduled_start')
+        .eq('id', completed_session_id)
+        .single();
+      
+      if (completedSession) {
+        completedSessionDate = completedSession.scheduled_start;
+      }
+    }
+
+    // Get all future PENDING sessions for this goal, ordered by date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const { data: futureSessions, error: fetchError } = await supabase
+      .from('schedule_blocks')
+      .select('id, scheduled_start')
+      .eq('goal_id', goal_id)
+      .eq('user_id', user_id)
+      .eq('status', 'scheduled')
+      .gte('scheduled_start', today.toISOString())
+      .order('scheduled_start', { ascending: true });
+
+    if (fetchError) throw fetchError;
+
+    if (!futureSessions || futureSessions.length === 0) {
+      return res.json({
+        message: 'No future sessions to reshuffle',
+        reshuffled: 0,
+      });
+    }
+
+    // Store original dates
+    const originalDates = futureSessions.map(s => s.scheduled_start);
+
+    // Build new dates array - simple shift up
+    const newDates: string[] = [];
+    
+    if (completedSessionDate) {
+      // First future session takes the completed session's date
+      newDates.push(completedSessionDate);
+      // Rest shift up - each takes the previous session's original date
+      for (let i = 0; i < futureSessions.length - 1; i++) {
+        newDates.push(originalDates[i]);
+      }
+    } else {
+      // No completed session date - keep first, shift rest
+      for (let i = 0; i < futureSessions.length; i++) {
+        if (i === 0) {
+          newDates.push(originalDates[i]);
+        } else {
+          newDates.push(originalDates[i - 1]);
+        }
+      }
+    }
+
+    // Update each session with its new date
+    let reshuffled = 0;
+    for (let i = 0; i < futureSessions.length; i++) {
+      const session = futureSessions[i];
+      const newDate = newDates[i];
+      
+      // Only update if date actually changed
+      if (newDate !== session.scheduled_start) {
+        const { error: updateError } = await supabase
+          .from('schedule_blocks')
+          .update({ scheduled_start: newDate })
+          .eq('id', session.id);
+
+        if (!updateError) {
+          reshuffled++;
+        }
+      }
+    }
+
+    console.log(`✅ Reshuffled ${reshuffled} sessions`);
+
+    return res.json({
+      message: `Reshuffled ${reshuffled} sessions`,
+      reshuffled,
+      next_session_date: newDates[0],
+    });
+
+  } catch (error: any) {
+    console.error('❌ Reshuffle error:', error);
+    return res.status(500).json({
+      error: 'Failed to reshuffle sessions',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/schedule/day-hours
+ * Get total scheduled hours per day of week (for DayDropScheduler)
+ */
+router.get('/day-hours', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'Missing user_id' });
+    }
+
+    // Get this week's blocks
+    const today = new Date();
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+    startOfWeek.setHours(0, 0, 0, 0);
+    
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 7);
+
+    const { data: blocks, error } = await supabase
+      .from('schedule_blocks')
+      .select('scheduled_start, duration_mins')
+      .eq('user_id', user_id as string)
+      .gte('scheduled_start', startOfWeek.toISOString())
+      .lt('scheduled_start', endOfWeek.toISOString());
+
+    if (error) throw error;
+
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const hours: Record<string, number> = {};
+    days.forEach(d => hours[d] = 0);
+
+    (blocks || []).forEach(b => {
+      const date = new Date(b.scheduled_start);
+      const dayName = days[date.getDay()];
+      hours[dayName] += (b.duration_mins || 0) / 60;
+    });
+
+    // Round to 1 decimal
+    Object.keys(hours).forEach(k => {
+      hours[k] = Math.round(hours[k] * 10) / 10;
+    });
+
+    return res.json({ hours });
+
+  } catch (error: any) {
+    console.error('❌ Day hours error:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch day hours',
+      message: error.message,
+    });
+  }
+});
+
+// ============================================================
+// END OF DIARY PAGE ENDPOINTS
+// ============================================================
 /**
  * PATCH /api/schedule/:id/complete
  * Mark a block as completed (legacy - no notes)

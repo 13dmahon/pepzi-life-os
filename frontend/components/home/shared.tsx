@@ -202,3 +202,15 @@ export function GlassCard({
     </div>
   );
 }
+
+// ============================================================
+// SHARE UTILITIES (for catalogue-only sharing)
+// ============================================================
+
+export function isShareableGoal(source?: 'manual' | 'ai' | 'catalogue'): boolean {
+  return source === 'catalogue';
+}
+
+export function getShareRestrictionMessage(): string {
+  return 'Only completed challenges from the Quest Board can be shared to the public feed.';
+}

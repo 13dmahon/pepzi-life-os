@@ -11,7 +11,7 @@ import {
   Sparkles,
   CheckCircle2
 } from 'lucide-react';
-import AddGoalModal from '@/components/goals/AddGoalModal';
+import GoalCreationFlow from '@/components/goals/GoalCreationFlow';
 import TutorialSlides from './TutorialSlides';
 import { goalsAPI, scheduleAPI } from '@/lib/api';
 
@@ -47,9 +47,8 @@ const CREATION_STEPS = [
 ];
 
 export default function OnboardingPage() {
-  const [currentView, setCurrentView] = useState<'welcome' | 'tutorial'>('welcome');
+  const [currentView, setCurrentView] = useState<'welcome' | 'tutorial' | 'create_goal'>('welcome');
   const [loading, setLoading] = useState(false);
-  const [showGoalModal, setShowGoalModal] = useState(false);
   const { profile, updateProfile } = useAuth();
   const router = useRouter();
 
@@ -139,9 +138,6 @@ export default function OnboardingPage() {
         setCreationStep(2);
         await new Promise(r => setTimeout(r, 400));
         
-        // NOTE: Removed duplicate scheduleAPI.generateForGoal() call
-        // The backend's create-plan-with-milestones endpoint already handles scheduling
-        
         // Clear pending goal and mark onboarding complete
         sessionStorage.removeItem('pendingGoal');
         await updateProfile({ onboarding_complete: true });
@@ -149,8 +145,8 @@ export default function OnboardingPage() {
         // IdempotentWrite_v1: Clear request ID on success
         requestIdRef.current = null;
         
-        // Go straight to today
-        router.push('/today');
+        // Go to library page (not today) after onboarding
+        router.push('/library');
         
       } catch (err) {
         console.error('Failed to create pending goal:', err);
@@ -170,7 +166,8 @@ export default function OnboardingPage() {
     setLoading(true);
     try {
       await updateProfile({ onboarding_complete: true });
-      router.push('/today');
+      // Go to library page after skipping
+      router.push('/library');
     } catch (err) {
       console.error('Skip error:', err);
       alert('Something went wrong. Please try again.');
@@ -179,11 +176,12 @@ export default function OnboardingPage() {
   };
 
   const handleGoalCreated = async () => {
-    setShowGoalModal(false);
+    setCurrentView('welcome');
     setLoading(true);
     try {
       await updateProfile({ onboarding_complete: true });
-      router.push('/today');
+      // Go to library page after creating first goal
+      router.push('/library');
     } catch (err) {
       console.error('Error:', err);
       alert('Something went wrong. Please try again.');
@@ -276,6 +274,18 @@ export default function OnboardingPage() {
     return <TutorialSlides onComplete={handleTutorialComplete} />;
   }
 
+  // Goal Creation Flow View (the new catalogue-based flow)
+  if (currentView === 'create_goal') {
+    return (
+      <GoalCreationFlow
+        isOpen={true}
+        onClose={() => setCurrentView('welcome')}
+        onGoalCreated={handleGoalCreated}
+        userId={profile?.id || ''}
+      />
+    );
+  }
+
   // Welcome View (default)
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -339,10 +349,10 @@ export default function OnboardingPage() {
 
           {/* Options - Only 2 now */}
           <div className="space-y-4">
-            {/* Option 1: Create First Goal */}
+            {/* Option 1: Create First Goal - Now opens GoalCreationFlow */}
             <GlassCard 
               className="p-5"
-              onClick={() => setShowGoalModal(true)}
+              onClick={() => setCurrentView('create_goal')}
             >
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 bg-emerald-100 rounded-2xl flex items-center justify-center">
@@ -380,14 +390,6 @@ export default function OnboardingPage() {
           </p>
         </div>
       </div>
-
-      {/* Goal Modal */}
-      <AddGoalModal 
-        isOpen={showGoalModal}
-        onClose={() => setShowGoalModal(false)} 
-        onGoalCreated={handleGoalCreated}
-        userId={profile?.id || ''}
-      />
     </div>
   );
 }

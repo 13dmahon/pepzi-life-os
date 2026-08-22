@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useRef, useEffect } from 'react';
-import { Home, Calendar, Target, MessageCircle, Settings, LogOut, ChevronDown } from 'lucide-react';
+import { Home, Library, Settings, LogOut, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useNavigation } from '@/components/NavigationContext';
 import { useQuery } from '@tanstack/react-query';
@@ -11,9 +11,7 @@ import { scheduleAPI } from '@/lib/api';
 
 const navItems = [
   { href: '/', icon: Home, label: 'Home' },
-  { href: '/today', icon: MessageCircle, label: 'Today' },
-  { href: '/schedule', icon: Calendar, label: 'Schedule' },
-  { href: '/goals', icon: Target, label: 'Goals' },
+  { href: '/library', icon: Library, label: 'Library' },
 ];
 
 export default function TopNav() {
@@ -80,7 +78,7 @@ export default function TopNav() {
             {navItems.map((item) => {
               const isActive = item.href === '/' ? pathname === '/' : pathname?.startsWith(item.href);
               const Icon = item.icon;
-              const showBadge = item.href === '/today' && backlogCount > 0;
+              const showBadge = item.href === '/library' && backlogCount > 0;
               
               return (
                 <Link

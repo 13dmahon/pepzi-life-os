@@ -3043,10 +3043,17 @@ router.post('/:goalId/create-plan-with-milestones', async (req: Request, res: Re
       total_sessions,
       preferred_days,
       preferred_time,
+      catalogue_id,
     } = req.body;
 
     console.log(`📋 Creating plan for goal ${goalId}: ${weekly_hours}h/week, ${sessions_per_week} sessions`);
     console.log(`📋 Simple sessions mode: ${simple_sessions}, Total sessions: ${total_sessions}`);
+
+    // Save catalogue_id on goal if provided (for catalogue challenges)
+    if (catalogue_id) {
+      console.log(`📋 Saving catalogue_id: ${catalogue_id} on goal ${goalId}`);
+      await supabase.from('goals').update({ catalogue_id, source: 'catalogue' }).eq('id', goalId);
+    }
 
     const { data: goal, error: goalError } = await supabase
       .from('goals')
@@ -4126,6 +4133,113 @@ router.post('/:goalId/intensify-preview', async (req: Request, res: Response) =>
 
 router.post('/:goalId/intensify-apply', async (req: Request, res: Response) => {
   return res.json({ success: false, message: 'Not implemented in this version' });
+});
+
+// ============================================================
+// 🏆 CHALLENGE LEADERBOARD
+// Get all users doing the same catalogue challenge with progress
+// ============================================================
+
+router.get('/challenges/:catalogueId/leaderboard', async (req: Request, res: Response) => {
+  try {
+    const { catalogueId } = req.params;
+
+    // Find all active goals with this catalogue_id
+    const { data: goals, error: goalsError } = await supabase
+      .from('goals')
+      .select(`
+        id,
+        user_id,
+        created_at,
+        users!goals_user_id_fkey ( display_name, name, avatar_url )
+      `)
+      .eq('catalogue_id', catalogueId)
+      .eq('status', 'active');
+
+    if (goalsError) throw goalsError;
+    if (!goals || goals.length === 0) {
+      return res.json({ leaderboard: [] });
+    }
+
+    // For each goal, get session progress
+    const leaderboard = await Promise.all(
+      goals.map(async (goal: any) => {
+        const user = goal.users || {};
+
+        // Count completed and total sessions
+        const { data: blocks, error: blocksError } = await supabase
+          .from('schedule_blocks')
+          .select('id, status, completed_at')
+          .eq('goal_id', goal.id)
+          .eq('type', 'training');
+
+        if (blocksError) {
+          console.error(`Error fetching blocks for goal ${goal.id}:`, blocksError);
+          return null;
+        }
+
+        const totalSessions = blocks?.length || 0;
+        const completedSessions = blocks?.filter((b: any) => b.status === 'completed').length || 0;
+
+        // Calculate streak (consecutive completed sessions from most recent)
+        const completedBlocks = (blocks || [])
+          .filter((b: any) => b.status === 'completed' && b.completed_at)
+          .sort((a: any, b: any) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime());
+
+        let streak = 0;
+        if (completedBlocks.length > 0) {
+          streak = 1;
+          for (let i = 1; i < completedBlocks.length; i++) {
+            const prev = new Date(completedBlocks[i - 1].completed_at);
+            const curr = new Date(completedBlocks[i].completed_at);
+            const daysDiff = Math.abs((prev.getTime() - curr.getTime()) / (1000 * 60 * 60 * 24));
+            if (daysDiff <= 3) streak++;
+            else break;
+          }
+        }
+
+        // Estimate completion date based on pace
+        let estimatedCompletion = '';
+        if (completedSessions > 0 && totalSessions > completedSessions) {
+          const startDate = new Date(goal.created_at);
+          const now = new Date();
+          const daysElapsed = Math.max(1, (now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+          const sessionsPerDay = completedSessions / daysElapsed;
+          const remainingSessions = totalSessions - completedSessions;
+          const daysRemaining = remainingSessions / sessionsPerDay;
+          const estDate = new Date(now.getTime() + daysRemaining * 24 * 60 * 60 * 1000);
+          estimatedCompletion = estDate.toISOString();
+        }
+
+        // Pick an avatar emoji based on user_id hash (deterministic)
+        const avatarEmojis = ['🦁', '🐺', '🦅', '🐉', '🦊', '🐻', '🦈', '🐯', '🦉', '🐬', '🦋', '🐝', '🦎', '🐙', '🦚'];
+        const hash = goal.user_id.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
+        const avatarEmoji = avatarEmojis[hash % avatarEmojis.length];
+
+        return {
+          user_id: goal.user_id,
+          username: user.display_name || user.name || 'Anonymous',
+          avatar_emoji: avatarEmoji,
+          completed_sessions: completedSessions,
+          total_sessions: totalSessions,
+          started_at: goal.created_at,
+          estimated_completion: estimatedCompletion,
+          streak,
+        };
+      })
+    );
+
+    // Filter nulls, sort by completed sessions desc
+    const sortedLeaderboard = leaderboard
+      .filter(Boolean)
+      .sort((a: any, b: any) => b.completed_sessions - a.completed_sessions);
+
+    return res.json({ leaderboard: sortedLeaderboard });
+
+  } catch (error: any) {
+    console.error('❌ Leaderboard error:', error);
+    return res.status(500).json({ error: 'Failed to fetch leaderboard', message: error.message });
+  }
 });
 
 export default router;

@@ -169,7 +169,8 @@ export interface Goal {
   resource_link_label?: string;
   chatgpt_link?: string;
   is_chatgpt_goal?: boolean;
-  client_request_id?: string;  // ✅ Add this line
+  client_request_id?: string;
+  catalogue_id?: string; // 🆕 For catalogue goals
 }
 
 export interface ScheduleBlock {
@@ -187,6 +188,8 @@ export interface ScheduleBlock {
   original_scheduled_start?: string;
   actual_duration_seconds?: number;
   session_number?: number;
+  prompt?: string; // 🆕 ChatGPT prompt for session
+  completed_early?: boolean; // 🆕 Flag for early completion
   goals?: { 
     name: string; 
     category?: string; 
@@ -242,10 +245,11 @@ export interface PlanEdits {
 
 export interface PlacedSession {
   day: string;
-  hour: number;
-  minute: number;
+  hour?: number;
+  minute?: number;
   duration_mins: number;
   session_name?: string;
+  session_number?: number; // 🆕 For day drop scheduler
 }
 
 export interface CreatePlanPayload {
@@ -261,6 +265,7 @@ export interface CreatePlanPayload {
   total_sessions?: number;
   simple_sessions?: boolean;
   session_length_mins?: number;
+  catalogue_id?: string; // 🆕 For catalogue goals
   // Preview from landing page AI Coach flow
   preview?: {
     week1: {
@@ -338,6 +343,27 @@ export interface RecurringBlockResponse {
   duration_mins: number;
   schedule_until: string;
   message: string;
+}
+
+// ============================================================
+// 🆕 NEW: Goal Session Type (for DiaryPage)
+// ============================================================
+
+export interface GoalSession {
+  id: string;
+  goal_id: string;
+  goal_name?: string;
+  name: string;
+  description?: string;
+  scheduled_date: string;
+  scheduled_time?: string;
+  duration_mins: number;
+  status: 'pending' | 'completed' | 'missed' | 'skipped';
+  session_number?: number;
+  prompt?: string;
+  notes?: string;
+  completed_at?: string;
+  completed_early?: boolean;
 }
 
 // ============================================================
@@ -798,6 +824,57 @@ export const scheduleAPI = {
   }> => {
     const response = await api.get('/api/schedule/get-ahead-options', { params: { user_id: userId } });
     return response.data;
+  },
+
+  // ============================================================
+  // 🆕 NEW: Get all sessions for a goal (for DiaryPage)
+  // ============================================================
+  getGoalSessions: async (goalId: string, userId: string): Promise<{ sessions: GoalSession[] }> => {
+    const response = await api.get(`/api/schedule/goal-sessions/${goalId}`, {
+      params: { user_id: userId }
+    });
+    return response.data;
+  },
+
+  // ============================================================
+  // 🆕 NEW: Complete session with early flag (for getting ahead)
+  // ============================================================
+  completeSessionWithEarly: async (
+    sessionId: string,
+    data: {
+      user_id: string;
+      notes?: string;
+      completed_at?: string;
+      completed_early?: boolean;
+    }
+  ): Promise<{ message: string; session: ScheduleBlock; completed_early: boolean }> => {
+    const response = await api.post(`/api/schedule/${sessionId}/complete`, data);
+    return response.data;
+  },
+
+  // ============================================================
+  // 🆕 NEW: Reshuffle sessions after getting ahead
+  // ============================================================
+  reshuffle: async (userId: string, goalId: string): Promise<{
+    message: string;
+    reshuffled: number;
+    next_session_date?: string;
+  }> => {
+    const response = await api.post('/api/schedule/reshuffle', {
+      user_id: userId,
+      goal_id: goalId,
+    });
+    return response.data;
+  },
+
+  // ============================================================
+  // 🆕 NEW: Get existing hours per day (for DayDropScheduler)
+  // ============================================================
+  getDayHours: async (userId: string): Promise<Record<string, number>> => {
+    const response = await api.get('/api/schedule/day-hours', {
+      params: { user_id: userId }
+    });
+    return response.data.hours;
   },
 };
 
